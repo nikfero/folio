@@ -68,3 +68,9 @@ export function isMarkdownPath(p: string): boolean {
   const ext = p.split(".").pop()?.toLowerCase() ?? "";
   return MARKDOWN_EXTS.includes(ext);
 }
+
+/** The menu-bar preference lives in the backend, which needs it before creating a window. */
+export const menuVisible = () => invoke<boolean>("menu_visible");
+
+/** Turns the native menu bar on or off for every window (no-op on macOS). */
+export const setMenuVisible = (visible: boolean) => invoke<void>("set_menu_visible", { visible });

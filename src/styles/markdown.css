@@ -1,7 +1,7 @@
 /* Rendered Markdown, loosely following GitHub's typography. */
 
 .markdown-body {
-  max-width: 820px;
+  max-width: var(--content-width, 820px);
   margin: 0 auto;
   padding: 36px 48px 40vh;
   font: calc(16px * var(--zoom)) / 1.65 var(--font-text);

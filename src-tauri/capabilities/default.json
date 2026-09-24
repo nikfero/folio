@@ -9,6 +9,7 @@
     "core:window:allow-destroy",
     "core:window:allow-close",
     "core:window:allow-set-focus",
+    "core:window:allow-show",
     "dialog:default",
     "opener:default"
   ]

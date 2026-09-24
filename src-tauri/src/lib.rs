@@ -1,10 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Manager, Wry, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri_plugin_window_state::StateFlags;
 
 /// A request to open a document in a window. `content` carries unsaved text
 /// when a dirty tab is moved to another window.
@@ -19,6 +22,26 @@ struct OpenRequest {
 struct Handoff {
     pending: Mutex<HashMap<String, Vec<OpenRequest>>>,
     ready: Mutex<HashSet<String>>,
+}
+
+/// Whether windows get a menu bar (Windows/Linux). Stored in a small file in
+/// the app config directory, because it must be known before a window is
+/// created: attaching or removing a menu later changes the window's size.
+#[derive(Default)]
+struct MenuBarPref(AtomicBool);
+
+fn menu_pref_file(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("menu-bar"))
+}
+
+fn load_menu_pref(app: &AppHandle) -> bool {
+    menu_pref_file(app)
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .is_some_and(|s| s.trim() == "1")
+}
+
+fn wants_menu(app: &AppHandle) -> bool {
+    cfg!(not(target_os = "macos")) && app.state::<MenuBarPref>().0.load(Ordering::Relaxed)
 }
 
 #[derive(Serialize)]
@@ -92,11 +115,19 @@ fn open_window(app: &AppHandle, docs: Vec<OpenRequest>) -> tauri::Result<()> {
         .lock()
         .unwrap()
         .insert(label.clone(), docs);
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+    create_window(app, &label)
+}
+
+fn create_window(app: &AppHandle, label: &str) -> tauri::Result<()> {
+    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title("Folio")
         .inner_size(1100.0, 760.0)
         .min_inner_size(480.0, 320.0)
-        .build()?;
+        .visible(false); // shown by the frontend once it has rendered
+    if wants_menu(app) {
+        builder = builder.menu(build_menu(app)?);
+    }
+    builder.build()?;
     Ok(())
 }
 
@@ -127,6 +158,128 @@ fn target_window(app: &AppHandle) -> Option<WebviewWindow> {
         .or_else(|| windows.get("main"))
         .or_else(|| windows.values().next())
         .cloned()
+}
+
+/// Whether windows currently get a menu bar (always false on macOS, where the
+/// global menu bar is always present).
+#[tauri::command]
+fn menu_visible(app: AppHandle) -> bool {
+    wants_menu(&app)
+}
+
+/// Turns the menu bar on or off for all windows (Windows/Linux; macOS always
+/// has its global menu bar). Does nothing if it is already in that state.
+#[tauri::command]
+fn set_menu_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+    if cfg!(target_os = "macos") || app.state::<MenuBarPref>().0.swap(visible, Ordering::Relaxed) == visible {
+        return Ok(());
+    }
+    if let Some(file) = menu_pref_file(&app) {
+        let _ = std::fs::create_dir_all(file.parent().unwrap_or(Path::new(".")));
+        let _ = std::fs::write(file, if visible { "1" } else { "0" });
+    }
+    for win in app.webview_windows().values() {
+        let result = if visible {
+            build_menu(&app).and_then(|m| win.set_menu(m).map(|_| ()))
+        } else {
+            win.remove_menu().map(|_| ())
+        };
+        result.map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Builds the application menu. Every custom item's id is a frontend command
+/// name; clicks are forwarded to the focused window as a "menu" event.
+fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
+    let item = |id: &str, text: &str, accel: Option<&str>| {
+        let b = MenuItemBuilder::with_id(id, text);
+        match accel {
+            Some(a) => b.accelerator(a).build(app),
+            None => b.build(app),
+        }
+    };
+
+    let file = SubmenuBuilder::new(app, "File")
+        .item(&item("new-tab", "New Tab", Some("CmdOrCtrl+T"))?)
+        .item(&item("new-window", "New Window", Some("CmdOrCtrl+Shift+N"))?)
+        .separator()
+        .item(&item("open", "Open…", Some("CmdOrCtrl+O"))?)
+        .separator()
+        .item(&item("save", "Save", Some("CmdOrCtrl+S"))?)
+        .item(&item("save-as", "Save As…", Some("CmdOrCtrl+Shift+S"))?)
+        .item(&item("reload", "Reload from Disk", None)?)
+        .item(&item("reveal", "Reveal in Folder", None)?)
+        .separator()
+        .item(&item("close-tab", "Close Tab", Some("CmdOrCtrl+W"))?);
+    #[cfg(not(target_os = "macos"))]
+    let file = file
+        .separator()
+        .item(&item("settings", "Settings…", Some("Ctrl+,"))?)
+        .separator()
+        .quit_with_text("Exit");
+
+    let view = SubmenuBuilder::new(app, "View")
+        .item(&item("mode-read", "Read", None)?)
+        .item(&item("mode-split", "Split", None)?)
+        .item(&item("mode-edit", "Edit", None)?)
+        .item(&item("cycle-mode", "Cycle View Mode", Some("CmdOrCtrl+E"))?)
+        .separator()
+        .item(&item("toggle-outline", "Toggle Outline", Some("CmdOrCtrl+Shift+O"))?)
+        .item(&item("find", "Find", Some("CmdOrCtrl+F"))?)
+        .item(&item("cycle-theme", "Change Theme", None)?)
+        .separator()
+        .item(&item("zoom-in", "Zoom In", Some("CmdOrCtrl+="))?)
+        .item(&item("zoom-out", "Zoom Out", Some("CmdOrCtrl+-"))?)
+        .item(&item("zoom-reset", "Actual Size", Some("CmdOrCtrl+0"))?);
+
+    let tabs = SubmenuBuilder::new(app, "Tab")
+        .item(&item("next-tab", "Next Tab", Some("Ctrl+Tab"))?)
+        .item(&item("prev-tab", "Previous Tab", Some("Ctrl+Shift+Tab"))?)
+        .separator()
+        .item(&item("move-tab", "Move Tab to New Window", None)?);
+
+    #[cfg(target_os = "macos")]
+    {
+        let app_menu = SubmenuBuilder::new(app, "Folio")
+            .about(None)
+            .separator()
+            .item(&item("settings", "Settings…", Some("Cmd+,"))?)
+            .separator()
+            .services()
+            .separator()
+            .hide()
+            .hide_others()
+            .show_all()
+            .separator()
+            .quit()
+            .build()?;
+        // The Edit menu is what makes Cmd+C/V/X/Z work inside the webview on macOS.
+        let edit = SubmenuBuilder::new(app, "Edit")
+            .undo()
+            .redo()
+            .separator()
+            .cut()
+            .copy()
+            .paste()
+            .select_all()
+            .build()?;
+        let window = SubmenuBuilder::new(app, "Window")
+            .minimize()
+            .maximize()
+            .fullscreen()
+            .separator()
+            .close_window()
+            .build()?;
+        Menu::with_items(app, &[&app_menu, &file.build()?, &edit, &view.build()?, &tabs.build()?, &window])
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let help = SubmenuBuilder::new(app, "Help")
+            .item(&item("about", "About Folio", None)?)
+            .build()?;
+        Menu::with_items(app, &[&file.build()?, &view.build()?, &tabs.build()?, &help])
+    }
 }
 
 fn docs_from_args(args: &[String], cwd: &Path) -> Vec<OpenRequest> {
@@ -162,10 +315,38 @@ pub fn run() {
                 }
             }
         }))
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                // Only the main window remembers its size and position; the
+                // frontend decides when to show it.
+                .with_filter(|label| label == "main")
+                .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Handoff::default())
+        .manage(MenuBarPref::default())
+        .on_menu_event(|app, event| {
+            let id = event.id().0.clone();
+            match target_window(app) {
+                Some(win) => {
+                    let _ = win.emit_to(win.label(), "menu", id);
+                }
+                None if id == "new-window" || id == "new-tab" || id == "open" => {
+                    let _ = open_window(app, Vec::new());
+                }
+                None => {}
+            }
+        })
         .setup(|app| {
+            let pref = load_menu_pref(app.handle());
+            app.state::<MenuBarPref>().0.store(pref, Ordering::Relaxed);
+            // macOS has one global menu bar; elsewhere each window gets its own (if enabled).
+            #[cfg(target_os = "macos")]
+            app.set_menu(build_menu(app.handle())?)?;
+            create_window(app.handle(), "main")?;
+
             let args: Vec<String> = std::env::args().collect();
             let cwd = std::env::current_dir().unwrap_or_default();
             let docs = docs_from_args(&args, &cwd);
@@ -179,7 +360,9 @@ pub fn run() {
             write_text,
             file_mtime,
             frontend_ready,
-            new_window
+            new_window,
+            menu_visible,
+            set_menu_visible
         ])
         .build(tauri::generate_context!())
         .expect("error while building Folio")

@@ -2,17 +2,19 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { EditorState, Text } from "@codemirror/state";
 import { openSearchPanel } from "@codemirror/search";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getVersion } from "@tauri-apps/api/app";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 
-import { createEditor, makeState, minimalReplace } from "./editor";
+import { createEditor, makeState, minimalReplace, setEditorConfig } from "./editor";
 import { Preview } from "./preview";
 import { ScrollMap, editorTopLine, revealLine, scrollEditorToLine } from "./scrollsync";
 import { FindBar } from "./find";
 import { toggleTaskLine } from "./markdown";
 import { icons } from "./icons";
-import { closeMenu, confirmUnsaved, showMenu, toast, type MenuEntry } from "./ui";
+import { closeMenu, confirmUnsaved, dialog, showMenu, toast, type MenuEntry } from "./ui";
 import * as settings from "./settings";
+import { openSettings } from "./settings-panel";
 import {
   MARKDOWN_EXTS,
   basename,
@@ -24,7 +26,9 @@ import {
   newWindow,
   pathKey,
   readText,
+  menuVisible,
   resolvePath,
+  setMenuVisible,
   writeText,
   type OpenRequest,
 } from "./platform";
@@ -44,12 +48,15 @@ interface Tab {
   mode: Mode;
   external: null | "changed" | "deleted";
   saving: boolean;
-  editorTop: number;
-  previewTop: number;
+  /** Fractional 0-based source line at the top of the view, restored on activation. */
+  topLine: number;
+  autoSaveTimer: number;
 }
 
 const mod = isMac ? "⌘" : "Ctrl+";
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
+const SERIF = 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif';
+const WIDTHS = { narrow: "680px", medium: "820px", wide: "1040px", full: "none" } as const;
 const MD_FILTERS = [
   { name: "Markdown", extensions: MARKDOWN_EXTS },
   { name: "All files", extensions: ["*"] },
@@ -80,6 +87,36 @@ export class App {
   private syncTimer = 0;
   private tocHeadings: { line: number; el: HTMLElement }[] = [];
   private wordCount = 0;
+  private restoring = true;
+  private version = "dev";
+
+  /** Every user-facing action, addressed by the same ids as the native menu items. */
+  private commands: Record<string, () => unknown> = {
+    "new-tab": () => this.newTab(),
+    "new-window": () => newWindow(),
+    open: () => this.openFileDialog(),
+    save: () => this.save(),
+    "save-as": () => this.saveAs(),
+    reload: () => this.reloadFromDisk(),
+    reveal: () => this.active?.path && revealItemInDir(this.active.path),
+    "close-tab": () => this.active && this.closeTab(this.active),
+    settings: () => this.showSettings(),
+    about: () => this.showAbout(),
+    "mode-read": () => this.setMode("read"),
+    "mode-split": () => this.setMode("split"),
+    "mode-edit": () => this.setMode("edit"),
+    "cycle-mode": () => this.cycleMode(),
+    "toggle-outline": () => this.toggleToc(),
+    find: () => this.openFind(),
+    "cycle-theme": () => this.cycleTheme(),
+    "zoom-in": () => this.zoom(0.1),
+    "zoom-out": () => this.zoom(-0.1),
+    "zoom-reset": () => this.zoom(null),
+    "next-tab": () => this.cycleTab(1),
+    "prev-tab": () => this.cycleTab(-1),
+    "move-tab": () => this.active && this.moveToNewWindow(this.active),
+  };
+  private lastCommand = { id: "", source: "", time: 0 };
 
   constructor() {
     this.view = createEditor(this.editorPane, (u) => this.onEditorUpdate(u));
@@ -93,16 +130,33 @@ export class App {
   }
 
   async start(): Promise<void> {
-    this.applyTheme();
-    this.applyZoom();
-    this.applyLayoutSettings();
+    this.version = await getVersion().catch(() => null) ?? "dev";
+    if (!isMac) settings.set("menuBar", (await menuVisible().catch(() => false)) === true);
+    this.applySettings();
     this.bindChrome();
     this.bindKeys();
     this.bindScrollSync();
     await this.bindWindow();
     this.refreshUi();
+    try {
+      await this.restoreSession();
+    } finally {
+      this.restoring = false;
+    }
     await this.openRequests(await frontendReady());
     setInterval(() => void this.pollDisk(), 1500);
+  }
+
+  /** Runs a command. `source` tells shortcuts that arrive twice (webview keydown + native menu accelerator) apart. */
+  runCommand(id: string, source: "key" | "menu" | "ui"): void {
+    if (source !== "ui" && document.querySelector(".modal-backdrop")) return;
+    const now = performance.now();
+    const last = this.lastCommand;
+    if (source !== "ui" && last.id === id && last.source !== source && last.source !== "ui" && now - last.time < 250) return;
+    this.lastCommand = { id, source, time: now };
+    closeMenu();
+    const result = this.commands[id]?.();
+    if (result instanceof Promise) result.catch((e) => toast(String(e), "error"));
   }
 
   // ------------------------------------------------------------------ tabs
@@ -130,8 +184,8 @@ export class App {
       mode: path ? settings.get("defaultMode") : "split",
       external: null,
       saving: false,
-      editorTop: 0,
-      previewTop: 0,
+      topLine: 0,
+      autoSaveTimer: 0,
       ...opts,
     };
     // Reuse a blank, untouched "Untitled" tab instead of piling up empty ones.
@@ -157,17 +211,22 @@ export class App {
     this.refreshUi();
     requestAnimationFrame(() => {
       if (this.active !== tab) return;
-      this.view.requestMeasure();
       this.lockSync("editor");
-      revealLine(this.view, tab.editorTop);
-      this.previewPane.scrollTop = tab.previewTop;
+      if (tab.mode !== "read") revealLine(this.view, tab.topLine);
+      if (tab.mode !== "edit") this.previewPane.scrollTop = this.scrollMap.topForLine(tab.topLine);
     });
   }
 
+  /** The source line at the top of whichever pane leads in the current mode. */
+  private currentTopLine(): number {
+    if (!this.active) return 0;
+    return this.active.mode === "edit"
+      ? editorTopLine(this.view)
+      : this.scrollMap.lineForTop(this.previewPane.scrollTop);
+  }
+
   private stashScroll(): void {
-    if (!this.active) return;
-    this.active.editorTop = editorTopLine(this.view);
-    this.active.previewTop = this.previewPane.scrollTop;
+    if (this.active) this.active.topLine = this.currentTopLine();
   }
 
   async closeTab(tab: Tab): Promise<boolean> {
@@ -227,7 +286,8 @@ export class App {
     }
   }
 
-  async openPath(path: string): Promise<Tab | null> {
+  /** Opens a file in a new tab (or focuses its existing tab). `quiet` suppresses the error toast. */
+  async openPath(path: string, opts: { quiet?: boolean; tab?: Partial<Tab> } = {}): Promise<Tab | null> {
     const existing = this.tabs.find((t) => t.path && pathKey(t.path) === pathKey(path));
     if (existing) {
       this.activate(existing);
@@ -239,15 +299,45 @@ export class App {
         bom: file.bom,
         eol: file.text.includes("\r\n") ? "\r\n" : "\n",
         mtime: file.mtime,
+        ...opts.tab,
       });
       settings.addRecent(path);
       return tab;
     } catch (e) {
       settings.removeRecent(path);
-      toast(`Couldn't open ${basename(path)}: ${e}`, "error");
+      if (!opts.quiet) toast(`Couldn't open ${basename(path)}: ${e}`, "error");
       this.refreshUi();
       return null;
     }
+  }
+
+  /** Reopens the main window's tabs from the last run. */
+  private async restoreSession(): Promise<void> {
+    if (this.win.label !== "main" || !settings.get("restoreSession")) return;
+    const { tabs, active } = settings.session();
+    const opened: (Tab | null)[] = [];
+    for (const t of tabs)
+      opened.push(await this.openPath(t.path, { quiet: true, tab: { mode: t.mode, topLine: t.topLine } }));
+    const target = opened[active];
+    if (target && target !== this.active) this.activate(target);
+  }
+
+  private sessionTimer = 0;
+
+  private scheduleSessionSave(): void {
+    if (this.win.label !== "main") return;
+    clearTimeout(this.sessionTimer);
+    this.sessionTimer = window.setTimeout(() => this.saveSession(), 400);
+  }
+
+  private saveSession(): void {
+    if (this.win.label !== "main" || this.restoring) return;
+    this.stashScroll();
+    const saved = this.tabs.filter((t) => t.path);
+    settings.saveSession({
+      tabs: saved.map((t) => ({ path: t.path!, mode: t.mode, topLine: t.topLine })),
+      active: Math.max(0, this.active ? saved.indexOf(this.active) : 0),
+    });
   }
 
   async openFileDialog(): Promise<void> {
@@ -260,9 +350,10 @@ export class App {
     for (const p of Array.isArray(picked) ? picked : [picked]) await this.openPath(p);
   }
 
-  async save(tab: Tab | null = this.active): Promise<boolean> {
+  async save(tab: Tab | null = this.active, quiet = false): Promise<boolean> {
     if (!tab) return false;
     if (!tab.path) return this.saveAs(tab);
+    clearTimeout(tab.autoSaveTimer);
     const doc = tab.state.doc;
     const text = tab.eol === "\r\n" ? doc.toString().replace(/\n/g, "\r\n") : doc.toString();
     tab.saving = true;
@@ -271,7 +362,7 @@ export class App {
       tab.savedDoc = doc;
       tab.external = null;
       this.refreshUi();
-      this.flash("Saved");
+      if (!quiet) this.flash("Saved");
       return true;
     } catch (e) {
       toast(`Couldn't save ${this.tabName(tab)}: ${e}`, "error");
@@ -324,6 +415,7 @@ export class App {
 
   /** Detects files changed or removed by other programs. */
   private async pollDisk(): Promise<void> {
+    this.scheduleSessionSave(); // keeps saved scroll positions current
     if (this.polling) return;
     this.polling = true;
     try {
@@ -363,6 +455,12 @@ export class App {
     if (u.docChanged) {
       this.scheduleRender();
       this.refreshUi();
+      if (settings.get("autoSave") && tab.path && !tab.external) {
+        clearTimeout(tab.autoSaveTimer);
+        tab.autoSaveTimer = window.setTimeout(() => {
+          if (this.tabs.includes(tab) && this.isDirty(tab) && !tab.external) void this.save(tab, true);
+        }, 1000);
+      }
     } else if (u.selectionSet) {
       this.updateStatus();
     }
@@ -488,12 +586,12 @@ export class App {
   setMode(mode: Mode): void {
     const tab = this.active;
     if (!tab || tab.mode === mode) return;
-    const prev = tab.mode;
     // Carry the reading position across the switch.
-    const line = prev === "edit" ? editorTopLine(this.view) : this.scrollMap.lineForTop(this.previewPane.scrollTop);
+    const line = this.currentTopLine();
     tab.mode = mode;
     this.applyMode();
     this.updateStatus();
+    this.scheduleSessionSave();
     requestAnimationFrame(() => {
       this.scrollMap.invalidate();
       this.lockSync("editor");
@@ -566,6 +664,7 @@ export class App {
   // -------------------------------------------------------------------- UI
 
   private refreshUi(): void {
+    this.scheduleSessionSave();
     this.renderTabs();
     this.applyMode();
     this.renderBanner();
@@ -680,38 +779,69 @@ export class App {
     this.flash(`Zoom ${Math.round(z * 100)}%`);
   }
 
-  private applyLayoutSettings(): void {
+  /** Applies every setting; also runs when another window changes one. */
+  private applySettings(): void {
+    this.applyTheme();
+    this.applyZoom();
+    const root = document.documentElement.style;
+    root.setProperty("--editor-font-size", `${settings.get("editorFontSize")}px`);
+    root.setProperty("--font-text", settings.get("previewFont") === "serif" ? SERIF : "var(--font-ui)");
+    root.setProperty("--content-width", WIDTHS[settings.get("previewWidth")] ?? WIDTHS.medium);
+    const effects = setEditorConfig({ lineNumbers: settings.get("lineNumbers"), wrapLines: settings.get("wrapLines") });
+    this.view.dispatch({ effects });
+    for (const t of this.tabs) if (t !== this.active) t.state = t.state.update({ effects }).state;
     this.tocEl.hidden = !settings.get("toc");
     this.workspace.style.setProperty("--split", String(settings.get("split")));
+    this.scrollMap.invalidate();
+  }
+
+  private showSettings(): void {
+    openSettings(
+      (key) => {
+        if (key === "menuBar") void setMenuVisible(settings.get("menuBar")).catch((e) => toast(String(e), "error"));
+        this.applySettings();
+        if (key === "theme" || key === "previewFont" || key === "previewWidth") this.renderNow();
+      },
+      { menuBar: !isMac, version: this.version },
+    );
+  }
+
+  private showAbout(): Promise<null> {
+    return dialog(
+      "Folio",
+      `Version ${this.version}. A light, fast Markdown viewer and editor.`,
+      [{ label: "OK", value: null, primary: true }],
+      null,
+    );
   }
 
   private appMenuEntries(): MenuEntry[] {
     const tab = this.active;
+    const item = (label: string, id: string, shortcut?: string, disabled = false): MenuEntry => ({
+      label,
+      shortcut,
+      disabled,
+      action: () => this.runCommand(id, "ui"),
+    });
     return [
-      { label: "New Tab", shortcut: `${mod}T`, action: () => this.newTab() },
-      { label: "Open File…", shortcut: `${mod}O`, action: () => void this.openFileDialog() },
-      { label: "Save", shortcut: `${mod}S`, disabled: !tab, action: () => void this.save() },
-      { label: "Save As…", shortcut: `${mod}⇧S`, disabled: !tab, action: () => void this.saveAs() },
+      item("New Tab", "new-tab", `${mod}T`),
+      item("Open File…", "open", `${mod}O`),
+      item("Save", "save", `${mod}S`, !tab),
+      item("Save As…", "save-as", `${mod}⇧S`, !tab),
       "separator",
-      { label: "New Window", shortcut: `${mod}⇧N`, action: () => void newWindow() },
-      {
-        label: "Move Tab to New Window",
-        disabled: !tab,
-        action: () => tab && void this.moveToNewWindow(tab),
-      },
+      item("New Window", "new-window", `${mod}⇧N`),
+      item("Move Tab to New Window", "move-tab", undefined, !tab),
       "separator",
-      { label: "Find", shortcut: `${mod}F`, disabled: !tab, action: () => this.openFind() },
-      { label: "Toggle Outline", shortcut: `${mod}⇧O`, action: () => this.toggleToc() },
-      { label: "Reload from Disk", disabled: !tab?.path, action: () => void this.reloadFromDisk() },
-      {
-        label: "Reveal in Folder",
-        disabled: !tab?.path,
-        action: () => tab?.path && void revealItemInDir(tab.path).catch((e) => toast(String(e), "error")),
-      },
+      item("Find", "find", `${mod}F`, !tab),
+      item("Toggle Outline", "toggle-outline", `${mod}⇧O`),
+      item("Reload from Disk", "reload", undefined, !tab?.path),
+      item("Reveal in Folder", "reveal", undefined, !tab?.path),
       "separator",
-      { label: "Zoom In", shortcut: `${mod}+`, action: () => this.zoom(0.1) },
-      { label: "Zoom Out", shortcut: `${mod}−`, action: () => this.zoom(-0.1) },
-      { label: "Actual Size", shortcut: `${mod}0`, action: () => this.zoom(null) },
+      item("Zoom In", "zoom-in", `${mod}+`),
+      item("Zoom Out", "zoom-out", `${mod}−`),
+      item("Actual Size", "zoom-reset", `${mod}0`),
+      "separator",
+      item("Settings…", "settings", `${mod},`),
     ];
   }
 
@@ -758,9 +888,9 @@ export class App {
     $("#btn-menu").innerHTML = icons.more;
     $("#btn-new-tab").title = `New tab (${mod}T)`;
     $("#btn-toc").title = `Outline (${mod}⇧O)`;
-    $("#btn-new-tab").addEventListener("click", () => this.newTab());
-    $("#btn-toc").addEventListener("click", () => this.toggleToc());
-    $("#btn-theme").addEventListener("click", () => this.cycleTheme());
+    $("#btn-new-tab").addEventListener("click", () => this.runCommand("new-tab", "ui"));
+    $("#btn-toc").addEventListener("click", () => this.runCommand("toggle-outline", "ui"));
+    $("#btn-theme").addEventListener("click", () => this.runCommand("cycle-theme", "ui"));
     $("#btn-menu").addEventListener("click", (e) => {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       showMenu(r.right - 220, r.bottom + 4, this.appMenuEntries());
@@ -894,39 +1024,59 @@ export class App {
   }
 
   private bindKeys(): void {
+    const shortcuts: Record<string, string> = {
+      o: "open",
+      "shift+o": "toggle-outline",
+      s: "save",
+      "shift+s": "save-as",
+      t: "new-tab",
+      n: "new-tab",
+      "shift+n": "new-window",
+      w: "close-tab",
+      e: "cycle-mode",
+      f: "find",
+      ",": "settings",
+      pagedown: "next-tab",
+      pageup: "prev-tab",
+      "=": "zoom-in",
+      "+": "zoom-in",
+      "shift+=": "zoom-in",
+      "shift++": "zoom-in",
+      "-": "zoom-out",
+      "0": "zoom-reset",
+    };
     window.addEventListener(
       "keydown",
       (e) => {
         const primary = isMac ? e.metaKey : e.ctrlKey;
         const key = e.key.toLowerCase();
-        const run = (fn: () => unknown) => {
+        const stop = () => {
           e.preventDefault();
           e.stopPropagation();
-          closeMenu();
-          fn();
         };
 
-        if (e.ctrlKey && key === "tab") return run(() => this.cycleTab(e.shiftKey ? -1 : 1));
-        if (key === "f5" || (primary && key === "r")) return run(() => {}); // never reload the webview
-        if (key === "escape" && this.find.isOpen) return run(() => this.find.close());
-        if (!primary || e.altKey) return;
+        if (key === "f5" || (primary && key === "r")) return stop(); // never reload the webview
+        if (key === "escape" && this.find.isOpen) {
+          stop();
+          return this.find.close();
+        }
 
-        if (key === "o" && e.shiftKey) return run(() => this.toggleToc());
-        if (key === "o") return run(() => void this.openFileDialog());
-        if (key === "s") return run(() => void (e.shiftKey ? this.saveAs() : this.save()));
-        if (key === "n" && e.shiftKey) return run(() => void newWindow());
-        if (key === "t" || key === "n") return run(() => this.newTab());
-        if (key === "w") return run(() => this.active && void this.closeTab(this.active));
-        if (key === "e") return run(() => this.cycleMode());
-        if (key === "f" && !this.view.hasFocus) return run(() => this.openFind());
-        if (key === "pagedown") return run(() => this.cycleTab(1));
-        if (key === "pageup") return run(() => this.cycleTab(-1));
-        if (key === "=" || key === "+") return run(() => this.zoom(0.1));
-        if (key === "-") return run(() => this.zoom(-0.1));
-        if (key === "0") return run(() => this.zoom(null));
-        if (/^[1-9]$/.test(key)) {
-          const tab = key === "9" ? this.tabs[this.tabs.length - 1] : this.tabs[Number(key) - 1];
-          if (tab) return run(() => this.activate(tab));
+        let id: string | undefined;
+        if (e.ctrlKey && key === "tab") id = e.shiftKey ? "prev-tab" : "next-tab";
+        else if (primary && !e.altKey) {
+          id = shortcuts[(e.shiftKey ? "shift+" : "") + key];
+          if (id === "find" && this.view.hasFocus) id = undefined; // CodeMirror's own search panel
+          if (!id && /^[1-9]$/.test(key) && !e.shiftKey) {
+            const tab = key === "9" ? this.tabs[this.tabs.length - 1] : this.tabs[Number(key) - 1];
+            if (tab) {
+              stop();
+              return this.activate(tab);
+            }
+          }
+        }
+        if (id) {
+          stop();
+          this.runCommand(id, "key");
         }
       },
       true,
@@ -941,6 +1091,12 @@ export class App {
 
   private async bindWindow(): Promise<void> {
     await this.win.listen<OpenRequest[]>("open-docs", (e) => void this.openRequests(e.payload));
+    await this.win.listen<string>("menu", (e) => this.runCommand(e.payload, "menu"));
+    window.addEventListener("storage", (e) => {
+      if (!settings.isSettingKey(e.key)) return;
+      this.applySettings();
+      if (e.key === "folio.theme" || e.key === "folio.previewFont") this.renderNow();
+    });
 
     const overlay = $("#drop-overlay");
     await this.win.onDragDropEvent((e) => {
@@ -958,6 +1114,7 @@ export class App {
     });
 
     await this.win.onCloseRequested(async (e) => {
+      this.saveSession();
       const dirty = this.tabs.filter((t) => this.isDirty(t));
       if (!dirty.length) return;
       e.preventDefault();

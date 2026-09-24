@@ -1,14 +1,39 @@
 // Per-user preferences, kept in localStorage (shared by all Folio windows).
 
+import type { Mode } from "./app";
+
 export interface Settings {
   theme: "system" | "light" | "dark";
-  defaultMode: "read" | "split" | "edit";
+  defaultMode: Mode;
   toc: boolean;
   split: number;
   zoom: number;
+  restoreSession: boolean;
+  autoSave: boolean;
+  menuBar: boolean;
+  editorFontSize: number;
+  lineNumbers: boolean;
+  wrapLines: boolean;
+  previewFont: "sans" | "serif";
+  previewWidth: "narrow" | "medium" | "wide" | "full";
 }
 
-const defaults: Settings = { theme: "system", defaultMode: "read", toc: true, split: 0.5, zoom: 1 };
+const defaults: Settings = {
+  theme: "system",
+  defaultMode: "read",
+  toc: true,
+  split: 0.5,
+  zoom: 1,
+  restoreSession: true,
+  autoSave: false,
+  menuBar: false,
+  editorFontSize: 14,
+  lineNumbers: true,
+  wrapLines: true,
+  previewFont: "sans",
+  previewWidth: "medium",
+};
+
 const PREFIX = "folio.";
 
 export function get<K extends keyof Settings>(key: K): Settings[K] {
@@ -29,34 +54,69 @@ export function set<K extends keyof Settings>(key: K, value: Settings[K]): void 
   }
 }
 
+/** True if a `storage` event key belongs to a setting (another window changed it). */
+export function isSettingKey(key: string | null): boolean {
+  return !!key && key.startsWith(PREFIX) && key.slice(PREFIX.length) in defaults;
+}
+
 export function resolvedTheme(): "light" | "dark" {
   const pref = get("theme");
   if (pref !== "system") return pref;
   return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-const RECENT_KEY = PREFIX + "recent";
-
-export function recent(): string[] {
+function readJson<T>(key: string, fallback: T): T {
   try {
-    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[];
+    const raw = localStorage.getItem(PREFIX + key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
-    return [];
+    return fallback;
   }
 }
 
-function saveRecent(list: string[]): void {
+function writeJson(key: string, value: unknown): void {
   try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 15)));
+    localStorage.setItem(PREFIX + key, JSON.stringify(value));
   } catch {
     /* storage unavailable */
   }
 }
 
+// ---- recent files
+
+export function recent(): string[] {
+  return readJson<string[]>("recent", []);
+}
+
 export function addRecent(path: string): void {
-  saveRecent([path, ...recent().filter((p) => p !== path)]);
+  writeJson("recent", [path, ...recent().filter((p) => p !== path)].slice(0, 15));
 }
 
 export function removeRecent(path: string): void {
-  saveRecent(recent().filter((p) => p !== path));
+  writeJson(
+    "recent",
+    recent().filter((p) => p !== path),
+  );
+}
+
+// ---- session (the main window's open tabs)
+
+export interface SessionTab {
+  path: string;
+  mode: Mode;
+  /** Fractional 0-based source line at the top of the view. */
+  topLine: number;
+}
+
+export interface Session {
+  tabs: SessionTab[];
+  active: number;
+}
+
+export function session(): Session {
+  return readJson<Session>("session", { tabs: [], active: 0 });
+}
+
+export function saveSession(s: Session): void {
+  writeJson("session", s);
 }

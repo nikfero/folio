@@ -1,4 +1,4 @@
-import { EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension, type StateEffect } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -44,6 +44,7 @@ const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "var(--bg)", color: "var(--fg)" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: "var(--font-mono)", lineHeight: "1.6", overflow: "auto" },
+  "&:not(:has(.cm-gutters)) .cm-line": { paddingLeft: "24px" },
   ".cm-content": { padding: "16px 0 50vh", caretColor: "var(--accent)" },
   ".cm-line": { padding: "0 20px 0 12px" },
   ".cm-gutters": { backgroundColor: "var(--bg)", color: "var(--fg-faint)", border: "none" },
@@ -79,9 +80,20 @@ const theme = EditorView.theme({
 
 let updateHandler: (u: ViewUpdate) => void = () => {};
 
-const extensions: Extension[] = [
-  lineNumbers(),
-  highlightActiveLineGutter(),
+export interface EditorConfig {
+  lineNumbers: boolean;
+  wrapLines: boolean;
+}
+
+let config: EditorConfig = { lineNumbers: true, wrapLines: true };
+const gutter = new Compartment();
+const wrap = new Compartment();
+const gutterExt = (on: boolean) => (on ? [lineNumbers(), highlightActiveLineGutter()] : []);
+const wrapExt = (on: boolean) => (on ? EditorView.lineWrapping : []);
+
+const extensions = (): Extension[] => [
+  gutter.of(gutterExt(config.lineNumbers)),
+  wrap.of(wrapExt(config.wrapLines)),
   highlightActiveLine(),
   history(),
   drawSelection(),
@@ -90,7 +102,6 @@ const extensions: Extension[] = [
   bracketMatching(),
   highlightSelectionMatches(),
   search({ top: true }),
-  EditorView.lineWrapping,
   markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
   syntaxHighlighting(highlightStyle),
   theme,
@@ -99,7 +110,13 @@ const extensions: Extension[] = [
 ];
 
 export function makeState(doc: string): EditorState {
-  return EditorState.create({ doc, extensions });
+  return EditorState.create({ doc, extensions: extensions() });
+}
+
+/** Updates the editor options; apply the returned effects to every open editor state. */
+export function setEditorConfig(next: EditorConfig): StateEffect<unknown>[] {
+  config = next;
+  return [gutter.reconfigure(gutterExt(next.lineNumbers)), wrap.reconfigure(wrapExt(next.wrapLines))];
 }
 
 export function createEditor(parent: HTMLElement, onUpdate: (u: ViewUpdate) => void): EditorView {

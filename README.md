@@ -14,6 +14,9 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 - YAML frontmatter shown as a tidy metadata table
 - Outline sidebar that follows your position, Find in the preview, word count and reading time
 - Light/dark/system themes and zoom
+- **Remembers your session**: open tabs, view mode, scroll position and window size come back on the next launch
+- **Settings** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>,</kbd>): default view, auto-save, editor font size, line numbers, line wrapping, preview font and text width
+- Native menu bar on macOS; optional on Windows and Linux (off by default, turn it on in Settings)
 - Relative links to other `.md` files open in a new tab; relative images just work
 - Keeps each file's line endings (LF/CRLF) and BOM exactly as they were
 - Opens files from the command line, from drag & drop, and from "Open with" (a single running instance receives them)
@@ -32,6 +35,7 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 | Toggle outline | Ctrl+Shift+O | ⌘⇧O |
 | Find | Ctrl+F | ⌘F |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | ⌘= / ⌘- / ⌘0 |
+| Settings | Ctrl+, | ⌘, |
 
 ## Development
 
