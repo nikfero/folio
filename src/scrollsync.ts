@@ -25,6 +25,9 @@ export class ScrollMap {
     const raw: Anchor[] = [{ line: 0, top: 0 }];
     for (const el of this.scroller.querySelectorAll<HTMLElement>("[data-line]")) {
       if (!el.offsetParent) continue; // hidden (e.g. collapsed <details>)
+      // Footnotes render at the end but keep their definition's line; as anchors
+      // they would push out every block between the definition and the end.
+      if (el.closest(".footnotes")) continue;
       raw.push({ line: Number(el.dataset.line), top: el.getBoundingClientRect().top - base });
     }
     raw.sort((a, b) => a.line - b.line || a.top - b.top);
