@@ -476,6 +476,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 
     let view = SubmenuBuilder::new(app, "View")
         .item(&item("mode-read", "Read", None)?)
+        .item(&item("mode-live", "Live Preview", None)?)
         .item(&item("mode-split", "Split", None)?)
         .item(&item("mode-edit", "Edit", None)?)
         .item(&item("cycle-mode", "Cycle View Mode", Some("CmdOrCtrl+E"))?)

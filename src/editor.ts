@@ -14,6 +14,7 @@ import { searchKeymap, highlightSelectionMatches, search } from "@codemirror/sea
 import { HighlightStyle, syntaxHighlighting, indentOnInput, bracketMatching } from "@codemirror/language";
 import { markdown, markdownLanguage, pasteURLAsLink } from "@codemirror/lang-markdown";
 import { formatTable, insertLink, toggleInline } from "./editing";
+import { livePreview, type LiveOptions } from "./livepreview";
 import { readClipboard } from "./platform";
 import { languages } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
@@ -135,12 +136,26 @@ export interface EditorConfig {
 let config: EditorConfig = { lineNumbers: true, wrapLines: true };
 const gutter = new Compartment();
 const wrap = new Compartment();
+const live = new Compartment();
+let liveExt: Extension = [];
+
+/** Sets up live preview (call once, before the editor is used). */
+export function configureLive(opts: LiveOptions): void {
+  liveExt = livePreview(opts);
+}
+
+/** Switches live preview on or off for the editor's current document. */
+export function setLive(view: EditorView, on: boolean): void {
+  const isOn = live.get(view.state) === liveExt;
+  if (isOn !== on) view.dispatch({ effects: live.reconfigure(on ? liveExt : []) });
+}
 const gutterExt = (on: boolean) => (on ? [lineNumbers(), highlightActiveLineGutter()] : []);
 const wrapExt = (on: boolean) => (on ? EditorView.lineWrapping : []);
 
 const extensions = (): Extension[] => [
   gutter.of(gutterExt(config.lineNumbers)),
   wrap.of(wrapExt(config.wrapLines)),
+  live.of([]),
   highlightActiveLine(),
   history(),
   drawSelection(),

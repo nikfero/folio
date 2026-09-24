@@ -4,10 +4,11 @@ import { openSearchPanel } from "@codemirror/search";
 import { redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion } from "@tauri-apps/api/app";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 
-import { createEditor, makeState, minimalReplace, onImagePaste, setEditorConfig } from "./editor";
+import { configureLive, createEditor, makeState, minimalReplace, onImagePaste, setEditorConfig, setLive } from "./editor";
 import { formatTable, insertLink, tableAt, toggleInline } from "./editing";
 import { Preview } from "./preview";
 import { ScrollMap, editorTopLine, revealLine, scrollEditorToLine } from "./scrollsync";
@@ -52,8 +53,10 @@ import {
   type OpenRequest,
 } from "./platform";
 
-export type Mode = "read" | "split" | "edit";
-const MODES: Mode[] = ["read", "split", "edit"];
+export type Mode = "read" | "live" | "split" | "edit";
+const MODES: Mode[] = ["read", "live", "split", "edit"];
+/** Modes that show only the editor (no rendered preview pane). */
+const editorOnly = (mode: Mode | undefined) => mode === "edit" || mode === "live";
 
 interface Tab {
   id: number;
@@ -149,6 +152,7 @@ export class App {
     "mode-read": () => this.setMode("read"),
     "mode-split": () => this.setMode("split"),
     "mode-edit": () => this.setMode("edit"),
+    "mode-live": () => this.setMode("live"),
     "cycle-mode": () => this.cycleMode(),
     "toggle-outline": () => this.showPanel("outline", true),
     "show-files": () => this.showPanel("files", false),
@@ -182,6 +186,10 @@ export class App {
   private lastCommand = { id: "", source: "", time: 0 };
 
   constructor() {
+    configureLive({
+      resolveImage: (src) => this.resolveImage(src),
+      openLink: (href) => void this.followLink(href),
+    });
     this.view = createEditor(this.editorPane, (u) => this.onEditorUpdate(u));
     onImagePaste((file) => void this.pasteImage(file));
     this.preview = new Preview(this.previewPane, {
@@ -293,14 +301,14 @@ export class App {
       if (this.active !== tab) return;
       this.lockSync("editor");
       if (tab.mode !== "read") revealLine(this.view, tab.topLine);
-      if (tab.mode !== "edit") this.previewPane.scrollTop = this.scrollMap.topForLine(tab.topLine);
+      if (!editorOnly(tab.mode)) this.previewPane.scrollTop = this.scrollMap.topForLine(tab.topLine);
     });
   }
 
   /** The source line at the top of whichever pane leads in the current mode. */
   private currentTopLine(): number {
     if (!this.active) return 0;
-    return this.active.mode === "edit"
+    return editorOnly(this.active.mode)
       ? editorTopLine(this.view)
       : this.scrollMap.lineForTop(this.previewPane.scrollTop);
   }
@@ -680,9 +688,10 @@ export class App {
       ["format-link", "Format: Link", keys("K")],
       ["format-table", "Format: Align Table Columns", isMac ? "⌥⇧F" : "Shift+Alt+F"],
       ["mode-read", "View: Read"],
+      ["mode-live", "View: Live Preview"],
       ["mode-split", "View: Split"],
       ["mode-edit", "View: Edit"],
-      ["cycle-mode", "View: Cycle Read / Split / Edit", keys("E")],
+      ["cycle-mode", "View: Cycle Read / Live / Split / Edit", keys("E")],
       ["toggle-sidebar", "Toggle Sidebar", keys("\\")],
       ["show-files", "Show Files"],
       ["toggle-outline", "Show Outline", keys("Shift+O")],
@@ -879,6 +888,18 @@ export class App {
     this.view.focus();
   }
 
+  /** Resolves an image path from the active document into a URL the webview can load. */
+  private resolveImage(src: string): string {
+    if (/^(https?:|data:|blob:)/i.test(src) || !this.active?.path) return src;
+    let path = src;
+    try {
+      path = decodeURI(src);
+    } catch {
+      /* keep as written */
+    }
+    return convertFileSrc(resolvePath(dirname(this.active.path), path.split(/[?#]/)[0]));
+  }
+
   private async followLink(href: string): Promise<void> {
     if (/^[a-z][\w+.-]*:/i.test(href) && !/^file:/i.test(href) && !/^[a-z]:[\\/]/i.test(href)) {
       await openUrl(href).catch((e) => toast(`Couldn't open link: ${e}`, "error"));
@@ -932,7 +953,7 @@ export class App {
         this.lockSync("editor");
         this.syncPreviewToEditor();
       }
-      if (this.active?.mode === "edit") this.updateTocActive();
+      if (editorOnly(this.active?.mode)) this.updateTocActive();
     });
     this.previewPane.addEventListener("scroll", () => {
       if (this.active?.mode === "split" && this.syncLock !== "editor") {
@@ -962,9 +983,9 @@ export class App {
       this.scrollMap.invalidate();
       this.lockSync("editor");
       if (mode !== "read") revealLine(this.view, line);
-      if (mode !== "edit") this.previewPane.scrollTop = this.scrollMap.topForLine(line);
+      if (!editorOnly(mode)) this.previewPane.scrollTop = this.scrollMap.topForLine(line);
     });
-    if (mode === "edit" && this.find.isOpen) this.find.close();
+    if (editorOnly(mode) && this.find.isOpen) this.find.close();
     if (mode !== "read") this.view.focus();
   }
 
@@ -975,6 +996,7 @@ export class App {
 
   private applyMode(): void {
     const mode = this.active?.mode ?? "read";
+    if (this.active) setLive(this.view, mode === "live");
     this.workspace.dataset.mode = this.active ? mode : "none";
     for (const b of document.querySelectorAll<HTMLElement>("#modes button"))
       b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
@@ -1003,7 +1025,7 @@ export class App {
       item.title = h.textContent ?? "";
       const line = Number(h.dataset.line ?? 0);
       item.addEventListener("click", () => {
-        if (this.active?.mode === "edit") revealLine(this.view, line);
+        if (editorOnly(this.active?.mode)) revealLine(this.view, line);
         else h.scrollIntoView({ block: "start" });
       });
       this.tocList.appendChild(item);
@@ -1015,7 +1037,7 @@ export class App {
   private updateTocActive(): void {
     if (this.tocEl.hidden || this.tocEl.dataset.panel !== "outline" || !this.tocHeadings.length) return;
     const line =
-      this.active?.mode === "edit"
+      editorOnly(this.active?.mode)
         ? editorTopLine(this.view)
         : this.scrollMap.lineForTop(this.previewPane.scrollTop + 24);
     let current = this.tocHeadings[0];
@@ -1547,7 +1569,7 @@ export class App {
   private openFind(): void {
     const tab = this.active;
     if (!tab) return;
-    if (tab.mode === "edit" || (tab.mode === "split" && this.view.hasFocus)) openSearchPanel(this.view);
+    if (editorOnly(tab.mode) || (tab.mode === "split" && this.view.hasFocus)) openSearchPanel(this.view);
     else this.find.open();
   }
 

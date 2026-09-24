@@ -36,6 +36,7 @@ function sections(opts: { menuBar: boolean }): Section[] {
           label: "Open files in",
           options: [
             ["read", "Read view"],
+            ["live", "Live preview"],
             ["split", "Split view"],
             ["edit", "Edit view"],
           ],
