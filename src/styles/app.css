@@ -38,6 +38,12 @@
   --syn-type: #b0620b;
   --syn-property: #b3404a;
   --syn-tag: #b3404a;
+
+  --callout-note: #0969da;
+  --callout-tip: #1a7f37;
+  --callout-important: #8250df;
+  --callout-warning: #9a6700;
+  --callout-caution: #cf222e;
   color-scheme: light;
 }
 
@@ -76,6 +82,12 @@
   --syn-type: #f0c070;
   --syn-property: #ff9c8f;
   --syn-tag: #ff9c8f;
+
+  --callout-note: #4493f8;
+  --callout-tip: #3fb950;
+  --callout-important: #ab7df8;
+  --callout-warning: #d29922;
+  --callout-caution: #f85149;
   color-scheme: dark;
 }
 
@@ -1528,6 +1540,37 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   border-left: 3px solid var(--border);
   padding-left: 60px !important;
   color: var(--fg-muted);
+}
+.cm-live .cm-live-callout {
+  border-left-color: var(--callout);
+  background: color-mix(in srgb, var(--callout) 7%, transparent);
+  color: var(--fg);
+}
+/* Undo the quote's italic grey; spans with a second class (emphasis, links…) keep theirs. */
+.cm-live .cm-live-callout > span:not([class*=" "]) {
+  font-style: normal;
+  color: inherit;
+}
+.cm-live .cm-live-callout-title {
+  color: var(--callout);
+  font-weight: 600;
+}
+.cm-live-callout-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  margin-right: 0.35em;
+}
+.cm-live-callout-label:empty {
+  vertical-align: -0.15em;
+}
+.cm-live-callout-label::before {
+  content: "";
+  width: 1.05em;
+  height: 1.05em;
+  background: currentColor;
+  -webkit-mask: var(--callout-icon) center / contain no-repeat;
+  mask: var(--callout-icon) center / contain no-repeat;
 }
 .cm-live .cm-live-frontmatter {
   font-family: var(--font-mono);

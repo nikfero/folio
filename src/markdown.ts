@@ -50,6 +50,68 @@ const taskLists: CoreRule = (state) => {
   }
 };
 
+/** Callout kinds (GitHub's five), with the aliases other tools use. */
+export const CALLOUTS: Record<string, string> = {
+  note: "note",
+  info: "note",
+  tip: "tip",
+  hint: "tip",
+  success: "tip",
+  important: "important",
+  warning: "warning",
+  attention: "warning",
+  caution: "caution",
+  danger: "caution",
+  error: "caution",
+};
+/** `[!NOTE]`, optional `+` / `-` (foldable, open / closed) and an optional title. */
+export const CALLOUT_MARKER = /^\[!(\w+)\]([+-]?)[ \t]*(.*)$/;
+
+/**
+ * GitHub-style callouts: a blockquote starting with `[!NOTE]` becomes a
+ * coloured box with a title; `[!NOTE]-` makes it a closed, foldable one.
+ */
+const callouts: CoreRule = (state) => {
+  const tokens = state.tokens;
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    const open = tokens[i];
+    const inline = tokens[i + 2];
+    if (open.type !== "blockquote_open" || tokens[i + 1].type !== "paragraph_open" || inline.type !== "inline") continue;
+    const [first, ...rest] = inline.content.split("\n");
+    const m = CALLOUT_MARKER.exec(first.trim());
+    const kind = m && CALLOUTS[m[1].toLowerCase()];
+    if (!m || !kind) continue;
+    const title = m[3].trim() || kind[0].toUpperCase() + kind.slice(1);
+    const foldable = m[2] !== "";
+    // Find the matching close at the same nesting level.
+    let depth = 0;
+    let close = i;
+    for (let j = i; j < tokens.length; j++) {
+      if (tokens[j].type === "blockquote_open") depth++;
+      else if (tokens[j].type === "blockquote_close" && --depth === 0) {
+        close = j;
+        break;
+      }
+    }
+    const tag = foldable ? "details" : "div";
+    open.tag = tokens[close].tag = tag;
+    open.attrJoin("class", `callout callout-${kind}`);
+    if (m[2] === "+") open.attrSet("open", "");
+    const head = new state.Token("html_block", "", 0);
+    head.content = foldable
+      ? `<summary class="callout-title">${escapeHtml(title)}</summary>\n`
+      : `<p class="callout-title">${escapeHtml(title)}</p>\n`;
+    if (rest.join("").trim()) {
+      inline.content = rest.join("\n");
+      const para = tokens[i + 1];
+      if (para.map) para.map = [para.map[0] + 1, para.map[1]]; // it now starts after the marker line
+      tokens.splice(i + 1, 0, head);
+    } else {
+      tokens.splice(i + 1, 3, head); // the paragraph held only the marker line
+    }
+  }
+};
+
 const mathInline: InlineRule = (state, silent) => {
   const src = state.src;
   const start = state.pos;
@@ -139,6 +201,7 @@ md.use(footnote);
 md.use(anchor, { slugify, tabIndex: false });
 md.inline.ruler.after("escape", "math_inline", mathInline);
 md.block.ruler.before("fence", "math_block", mathBlock, { alt: ["paragraph", "reference", "blockquote", "list"] });
+md.core.ruler.after("block", "callouts", callouts);
 md.core.ruler.after("inline", "task_lists", taskLists);
 md.core.ruler.push("source_lines", sourceLines);
 

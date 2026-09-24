@@ -12,6 +12,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { liveBlocks } from "./liveblocks";
+import { CALLOUTS, CALLOUT_MARKER } from "./markdown";
 
 export interface LiveOptions {
   /** Turns an image `src` from the document into a URL the webview can load. */
@@ -91,6 +92,22 @@ class ImageWidget extends WidgetType {
     img.alt = this.alt;
     img.title = this.alt;
     return img;
+  }
+}
+
+/** The icon (and default title) replacing a callout's `[!NOTE]` marker. */
+class CalloutWidget extends WidgetType {
+  constructor(readonly label: string) {
+    super();
+  }
+  eq(other: CalloutWidget) {
+    return other.label === this.label;
+  }
+  toDOM() {
+    const el = document.createElement("span");
+    el.className = "cm-live-callout-label";
+    el.textContent = this.label;
+    return el;
   }
 }
 
@@ -272,9 +289,23 @@ function build(view: EditorView, opts: LiveOptions): DecorationSet {
               out.push(Decoration.mark({ class: "cm-live-done" }).range(textFrom, parent.to));
             return;
           }
-          case "Blockquote":
+          case "Blockquote": {
             eachLine(node.from, node.to, "cm-live-quote");
+            const first = doc.lineAt(node.from);
+            const at = first.text.indexOf("[!");
+            const m = at >= 0 && /^\s*(?:>\s?)+$/.test(first.text.slice(0, at)) ? CALLOUT_MARKER.exec(first.text.slice(at)) : null;
+            const kind = m && CALLOUTS[m[1].toLowerCase()];
+            if (!m || !kind) return;
+            eachLine(node.from, node.to, `cm-live-callout cm-live-callout-${kind}`);
+            out.push(lineClass("cm-live-callout-title").range(first.from));
+            if (!lineActive(node.from)) {
+              const title = m[3].trim();
+              const end = first.from + first.text.length - m[3].length;
+              const label = title ? "" : kind[0].toUpperCase() + kind.slice(1);
+              out.push(Decoration.replace({ widget: new CalloutWidget(label) }).range(first.from + at, end));
+            }
             return;
+          }
           case "QuoteMark": {
             if (lineActive(node.from)) return;
             const end = doc.sliceString(node.to, node.to + 1) === " " ? node.to + 1 : node.to;
