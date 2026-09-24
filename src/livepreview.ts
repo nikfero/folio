@@ -99,6 +99,74 @@ const bullet = Decoration.replace({ widget: new BulletWidget() });
 const rule = Decoration.replace({ widget: new RuleWidget() });
 const lineClass = (cls: string) => Decoration.line({ class: cls });
 
+/** Inline HTML elements Live mode renders, by tag name → class of the styled text. */
+const htmlStyles: Record<string, string> = {
+  kbd: "cm-live-kbd",
+  b: "cm-live-bold",
+  strong: "cm-live-bold",
+  i: "cm-live-italic",
+  em: "cm-live-italic",
+  u: "cm-live-underline",
+  ins: "cm-live-underline",
+  s: "cm-live-strike",
+  del: "cm-live-strike",
+  strike: "cm-live-strike",
+  mark: "cm-live-highlight",
+  sub: "cm-live-sub",
+  sup: "cm-live-sup",
+  small: "cm-live-small",
+  code: "cm-live-code",
+  // Tags hidden without extra styling
+  span: "",
+  abbr: "",
+  cite: "",
+  dfn: "",
+  font: "",
+  q: "",
+  samp: "",
+  var: "",
+};
+
+interface HtmlTag {
+  from: number;
+  to: number;
+  name: string;
+  closing: boolean;
+  /** Start of the enclosing block; tags pair only within one block. */
+  block: number;
+}
+
+const inlineNodes = /^(Emphasis|StrongEmphasis|Strikethrough|Link|InlineCode|HTMLTag)$/;
+
+/** Parses `<name ...>`, `</name>` or `<name/>`; null for comments and other tags. */
+function parseTag(text: string): { name: string; closing: boolean; selfClosing: boolean } | null {
+  const m = /^<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*?(\/?)>$/.exec(text);
+  return m ? { name: m[2].toLowerCase(), closing: m[1] === "/", selfClosing: m[3] === "/" } : null;
+}
+
+/** Hides matching tag pairs (`<kbd>x</kbd>`) and styles the text between them; `<br>` is hidden. */
+function htmlDecorations(
+  tags: HtmlTag[],
+  touches: (from: number, to: number) => boolean,
+  out: Range<Decoration>[],
+): void {
+  tags.sort((a, b) => a.from - b.from);
+  const open = new Map<string, HtmlTag[]>();
+  for (const tag of tags) {
+    const key = `${tag.block}:${tag.name}`;
+    if (!tag.closing) {
+      if (!open.has(key)) open.set(key, []);
+      open.get(key)!.push(tag);
+      continue;
+    }
+    const start = open.get(key)?.pop();
+    if (!start || touches(start.from, tag.to)) continue;
+    out.push(hide.range(start.from, start.to), hide.range(tag.from, tag.to));
+    const cls = htmlStyles[tag.name];
+    if (cls && tag.from > start.to) out.push(Decoration.mark({ class: cls }).range(start.to, tag.from));
+  }
+}
+
 /** Line numbers touched by any selection range (where block syntax is revealed). */
 function activeLines(state: EditorState): Set<number> {
   const lines = new Set<number>();
@@ -117,6 +185,7 @@ function build(view: EditorView, opts: LiveOptions): DecorationSet {
   const touches = (from: number, to: number) => state.selection.ranges.some((r) => r.from <= to && r.to >= from);
   const lineActive = (pos: number) => lines.has(doc.lineAt(pos).number);
   const out: Range<Decoration>[] = [];
+  const htmlTags: HtmlTag[] = [];
   const eachLine = (from: number, to: number, cls: string) => {
     for (let n = doc.lineAt(from).number; n <= doc.lineAt(to).number; n++) out.push(lineClass(cls).range(doc.line(n).from));
   };
@@ -219,10 +288,24 @@ function build(view: EditorView, opts: LiveOptions): DecorationSet {
           case "CodeBlock":
             eachLine(node.from, node.to, "cm-live-codeblock");
             return false;
+          case "HTMLTag": {
+            const tag = parseTag(doc.sliceString(node.from, node.to));
+            if (!tag) return;
+            if (tag.name === "br") {
+              if (!touches(node.from, node.to)) out.push(hide.range(node.from, node.to));
+              return;
+            }
+            if (tag.selfClosing || !(tag.name in htmlStyles)) return;
+            let block = parent;
+            while (block && inlineNodes.test(block.name)) block = block.parent;
+            htmlTags.push({ from: node.from, to: node.to, name: tag.name, closing: tag.closing, block: block?.from ?? 0 });
+            return;
+          }
         }
       },
     });
   }
+  htmlDecorations(htmlTags, touches, out);
   return Decoration.set(out, true);
 }
 

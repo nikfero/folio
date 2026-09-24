@@ -1481,6 +1481,43 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   border-radius: 4px;
   padding: 0.1em 0.2em;
 }
+/* Inline HTML elements (<kbd>, <b>, <mark>…) rendered in Live mode */
+.cm-live-kbd {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg);
+}
+.cm-live-bold {
+  font-weight: 700;
+}
+.cm-live-italic {
+  font-style: italic;
+}
+.cm-live-underline {
+  text-decoration: underline;
+}
+.cm-live-strike {
+  text-decoration: line-through;
+}
+.cm-live-highlight {
+  background: var(--match);
+  border-radius: 2px;
+}
+.cm-live-sub,
+.cm-live-sup,
+.cm-live-small {
+  font-size: 0.8em;
+}
+.cm-live-sub {
+  vertical-align: sub;
+}
+.cm-live-sup {
+  vertical-align: super;
+}
 .cm-live .cm-live-codeblock {
   font-family: var(--font-mono);
   font-size: 0.88em;
