@@ -40,9 +40,15 @@ function frontmatterHtml(fm: Frontmatter): string {
 
 const EXTERNAL = /^(https?:|data:|blob:|asset:|mailto:)/i;
 
+const HEADING = /^H([1-6])$/;
+const level = (el: Element) => Number(HEADING.exec(el.tagName)?.[1] ?? 0);
+
 export class Preview {
   readonly body: HTMLElement;
   private generation = 0;
+  /** Folded headings (by id) per document, kept across re-renders. */
+  private folds = new Map<string, Set<string>>();
+  private docKey = "";
 
   constructor(
     readonly scroller: HTMLElement,
@@ -51,7 +57,7 @@ export class Preview {
     this.body = scroller.querySelector(".markdown-body")!;
     this.body.addEventListener("click", (e) => this.onClick(e));
     this.body.addEventListener("dblclick", (e) => {
-      if ((e.target as Element).closest("a, input, .code-copy")) return;
+      if ((e.target as Element).closest("a, input, .code-copy, .heading-fold")) return;
       const line = this.lineAt(e.target as Element);
       if (line != null) this.handlers.onJumpToSource(line, "dblclick");
     });
@@ -59,6 +65,7 @@ export class Preview {
 
   render(text: string, docPath: string | null, theme: "light" | "dark"): void {
     const gen = ++this.generation;
+    this.docKey = docPath ?? "";
     const result = renderMarkdown(text);
     let html = sanitize(result.html);
     if (result.frontmatter) html = frontmatterHtml(result.frontmatter) + html;
@@ -66,6 +73,8 @@ export class Preview {
 
     if (docPath) this.rewriteImages(dirname(docPath));
     this.addCopyButtons();
+    this.addFoldToggles();
+    this.applyFolds();
 
     if (result.hasMath) {
       if (mathModule) mathModule.renderMath(this.body);
@@ -98,7 +107,77 @@ export class Preview {
 
   scrollToId(id: string): void {
     const target = this.body.querySelector(`#${CSS.escape(id)}`) ?? this.body.querySelector(`[name="${CSS.escape(id)}"]`);
-    if (target) target.scrollIntoView({ block: "start" });
+    if (target) {
+      this.reveal(target);
+      target.scrollIntoView({ block: "start" });
+    }
+  }
+
+  // ------------------------------------------------------------ folding
+
+  private folded(): Set<string> {
+    let set = this.folds.get(this.docKey);
+    if (!set) this.folds.set(this.docKey, (set = new Set()));
+    return set;
+  }
+
+  /** A fold arrow on each top-level heading that has something under it. */
+  private addFoldToggles(): void {
+    for (const h of this.body.children) {
+      if (!level(h) || !h.id) continue;
+      const next = h.nextElementSibling;
+      if (!next || (level(next) && level(next) <= level(h))) continue;
+      const btn = document.createElement("span");
+      btn.className = "heading-fold";
+      btn.setAttribute("role", "button");
+      btn.title = "Fold section";
+      h.prepend(btn);
+    }
+  }
+
+  /** Hides everything under a folded heading, up to the next heading of the same or a higher level. */
+  private applyFolds(): void {
+    const folded = this.folded();
+    let hideBelow = 0; // level of the folded heading being hidden under; 0 = none
+    for (const el of this.body.children) {
+      const l = level(el);
+      if (l && hideBelow && l <= hideBelow) hideBelow = 0;
+      el.classList.toggle("fold-hidden", hideBelow > 0);
+      if (!l) continue;
+      const isFolded = folded.has(el.id) && !!el.querySelector(":scope > .heading-fold");
+      el.classList.toggle("folded", isFolded);
+      const btn = el.querySelector<HTMLElement>(":scope > .heading-fold");
+      if (btn) btn.title = isFolded ? "Unfold section" : "Fold section";
+      if (isFolded && !hideBelow) hideBelow = l;
+    }
+  }
+
+  toggleFold(heading: Element): void {
+    const folded = this.folded();
+    if (folded.has(heading.id)) folded.delete(heading.id);
+    else folded.add(heading.id);
+    this.applyFolds();
+  }
+
+  /** Folds (or unfolds) every section of the document. */
+  foldAll(fold: boolean): void {
+    const folded = this.folded();
+    folded.clear();
+    if (fold) for (const b of this.body.querySelectorAll(":scope > * > .heading-fold")) folded.add(b.parentElement!.id);
+    this.applyFolds();
+  }
+
+  /** Unfolds whatever hides `el`, so it can be scrolled to. */
+  reveal(el: Element): void {
+    let top: Element | null = el;
+    while (top && top.parentElement !== this.body) top = top.parentElement;
+    for (let guard = 0; top?.classList.contains("fold-hidden") && guard < 20; guard++) {
+      let prev = top.previousElementSibling;
+      while (prev && !prev.classList.contains("folded")) prev = prev.previousElementSibling;
+      if (!prev) break;
+      this.folded().delete(prev.id);
+      this.applyFolds();
+    }
   }
 
   /** Words of prose, ignoring code, math and diagrams. */
@@ -147,6 +226,13 @@ export class Preview {
 
   private onClick(e: MouseEvent): void {
     const target = e.target as Element;
+
+    const fold = target.closest(".heading-fold");
+    if (fold) {
+      e.preventDefault();
+      this.toggleFold(fold.parentElement!);
+      return;
+    }
 
     const copy = target.closest(".code-copy");
     if (copy) {

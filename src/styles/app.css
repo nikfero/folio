@@ -1572,6 +1572,42 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   -webkit-mask: var(--callout-icon) center / contain no-repeat;
   mask: var(--callout-icon) center / contain no-repeat;
 }
+.cm-live .cm-line[class*="cm-live-h"] {
+  position: relative;
+}
+.cm-live-fold {
+  position: absolute;
+  left: 22px;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  cursor: pointer;
+  color: var(--fg-faint);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.cm-live-fold::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-70%) rotate(45deg);
+  transition: transform 0.15s;
+}
+.cm-live-fold.folded::before {
+  transform: translateY(-50%) rotate(-45deg);
+}
+.cm-line:hover > .cm-live-fold,
+.cm-live-fold.folded {
+  opacity: 1;
+}
+.cm-live-fold:hover {
+  color: var(--fg);
+}
 .cm-live .cm-live-frontmatter {
   font-family: var(--font-mono);
   font-size: 0.82em;

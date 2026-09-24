@@ -283,6 +283,69 @@
   --callout-icon: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M7.9 2h8.2L22 7.9v8.2L16.1 22H7.9L2 16.1V7.9z'/><path d='M12 8v4M12 16h.01'/></svg>");
 }
 
+/* Folding sections: an arrow left of each heading (shown on hover), content hidden when folded. */
+.markdown-body > :is(h1, h2, h3, h4, h5, h6) {
+  position: relative;
+}
+.heading-fold {
+  position: absolute;
+  left: -1.35em;
+  top: 0;
+  bottom: 0;
+  width: 1.1em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.heading-fold::before {
+  content: "";
+  width: 0.32em;
+  height: 0.32em;
+  border: solid currentColor;
+  border-width: 0 0.1em 0.1em 0;
+  transform: rotate(45deg) translate(-15%, -15%);
+  transition: transform 0.15s;
+}
+.markdown-body > :hover > .heading-fold,
+.markdown-body > .folded > .heading-fold {
+  opacity: 1;
+}
+.heading-fold:hover {
+  color: var(--fg);
+}
+.markdown-body > .folded > .heading-fold::before {
+  transform: rotate(-45deg) translate(-15%, -15%);
+}
+.markdown-body > .folded::after {
+  content: "\22EF";
+  display: inline-block;
+  margin-left: 0.5em;
+  padding: 0 0.45em;
+  font-size: 0.6em;
+  line-height: 1.5;
+  vertical-align: middle;
+  color: var(--fg-muted);
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.markdown-body > .fold-hidden {
+  display: none !important;
+}
+@media print {
+  .heading-fold,
+  .markdown-body > .folded::after {
+    display: none !important;
+  }
+  .markdown-body > .fold-hidden {
+    display: revert !important;
+  }
+}
+
 /* Frontmatter, shown as a compact metadata table. */
 .markdown-body .frontmatter {
   font-size: 0.85em;

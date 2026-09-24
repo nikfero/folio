@@ -11,7 +11,15 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches, search } from "@codemirror/search";
-import { HighlightStyle, syntaxHighlighting, indentOnInput, bracketMatching } from "@codemirror/language";
+import {
+  HighlightStyle,
+  syntaxHighlighting,
+  indentOnInput,
+  bracketMatching,
+  codeFolding,
+  foldGutter,
+  foldKeymap,
+} from "@codemirror/language";
 import { markdown, markdownLanguage, pasteURLAsLink } from "@codemirror/lang-markdown";
 import { formatTable, insertLink, toggleInline } from "./editing";
 import { livePreview, type LiveOptions } from "./livepreview";
@@ -49,11 +57,22 @@ const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "var(--bg)", color: "var(--fg)" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: "var(--font-mono)", lineHeight: "1.6", overflow: "auto" },
-  "&:not(:has(.cm-gutters)) .cm-line": { paddingLeft: "24px" },
+  "&:not(:has(.cm-lineNumbers)) .cm-line": { paddingLeft: "10px" },
   ".cm-content": { padding: "16px 0 50vh", caretColor: "var(--accent)" },
   ".cm-line": { padding: "0 20px 0 12px" },
   ".cm-gutters": { backgroundColor: "var(--bg)", color: "var(--fg-faint)", border: "none" },
   ".cm-lineNumbers .cm-gutterElement": { padding: "0 6px 0 14px", minWidth: "2.5em" },
+  ".cm-foldGutter .cm-gutterElement": { padding: "0 2px 0 4px", cursor: "pointer" },
+  ".cm-fold-marker": { display: "inline-block", width: "12px", textAlign: "center", opacity: "0", transition: "opacity 0.15s" },
+  ".cm-gutters:hover .cm-fold-marker, .cm-fold-marker.folded": { opacity: "1" },
+  ".cm-foldPlaceholder": {
+    backgroundColor: "var(--bg-alt)",
+    border: "1px solid var(--border)",
+    borderRadius: "999px",
+    color: "var(--fg-muted)",
+    padding: "0 6px",
+    margin: "0 4px",
+  },
   ".cm-activeLine": { backgroundColor: "var(--active-line)" },
   ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--fg-muted)" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
@@ -166,8 +185,23 @@ export function setLive(view: EditorView, on: boolean): void {
 const gutterExt = (on: boolean) => (on ? [lineNumbers(), highlightActiveLineGutter()] : []);
 const wrapExt = (on: boolean) => (on ? EditorView.lineWrapping : []);
 
+/** Fold arrows next to headings (and other foldable blocks), visible when the gutter is hovered. */
+const folding: Extension = [
+  codeFolding({ placeholderText: "⋯" }),
+  foldGutter({
+    markerDOM(open) {
+      const el = document.createElement("span");
+      el.className = open ? "cm-fold-marker" : "cm-fold-marker folded";
+      el.textContent = open ? "⌄" : "›";
+      el.title = open ? "Fold section" : "Unfold section";
+      return el;
+    },
+  }),
+];
+
 const extensions = (): Extension[] => [
   gutter.of(gutterExt(config.lineNumbers)),
+  folding,
   wrap.of(wrapExt(config.wrapLines)),
   live.of([]),
   focus.of([]),
@@ -185,7 +219,7 @@ const extensions = (): Extension[] => [
   imagePaste,
   syntaxHighlighting(highlightStyle),
   theme,
-  keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+  keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, ...foldKeymap, indentWithTab]),
   EditorView.updateListener.of((u) => updateHandler(u)),
 ];
 

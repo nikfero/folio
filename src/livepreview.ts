@@ -1,7 +1,7 @@
 // "Live" mode: the editor renders Markdown formatting in place and reveals the
 // syntax only where the cursor is, so the file itself is never rewritten.
 
-import { syntaxTree } from "@codemirror/language";
+import { foldable, foldedRanges, foldEffect, syntaxTree, unfoldEffect } from "@codemirror/language";
 import { type EditorState, type Extension, type Range } from "@codemirror/state";
 import {
   Decoration,
@@ -108,6 +108,35 @@ class CalloutWidget extends WidgetType {
     el.className = "cm-live-callout-label";
     el.textContent = this.label;
     return el;
+  }
+}
+
+/** The fold arrow in the margin left of a heading (Live mode has no gutter). */
+class HeadingFoldWidget extends WidgetType {
+  constructor(
+    readonly folded: boolean,
+    readonly from: number,
+    readonly to: number,
+  ) {
+    super();
+  }
+  eq(other: HeadingFoldWidget) {
+    return other.folded === this.folded && other.from === this.from && other.to === this.to;
+  }
+  toDOM(view: EditorView) {
+    const el = document.createElement("span");
+    el.className = this.folded ? "cm-live-fold folded" : "cm-live-fold";
+    el.title = this.folded ? "Unfold section" : "Fold section";
+    el.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      view.dispatch({
+        effects: (this.folded ? unfoldEffect : foldEffect).of({ from: this.from, to: this.to }),
+      });
+    });
+    return el;
+  }
+  ignoreEvent() {
+    return true;
   }
 }
 
@@ -222,7 +251,16 @@ function build(view: EditorView, opts: LiveOptions): DecorationSet {
         const parent = node.node.parent;
         const heading = /^ATXHeading(\d)$/.exec(name);
         if (heading) {
-          out.push(lineClass(`cm-live-h${heading[1]}`).range(doc.lineAt(node.from).from));
+          const line = doc.lineAt(node.from);
+          out.push(lineClass(`cm-live-h${heading[1]}`).range(line.from));
+          let range = foldable(state, line.from, line.to);
+          let folded = false;
+          foldedRanges(state).between(line.to, line.to, (from, to) => {
+            range = { from, to };
+            folded = true;
+          });
+          if (range)
+            out.push(Decoration.widget({ widget: new HeadingFoldWidget(folded, range.from, range.to), side: -1 }).range(line.from));
           return;
         }
         switch (name) {
@@ -349,7 +387,13 @@ export function livePreview(opts: LiveOptions): Extension {
         this.decorations = build(view, opts);
       }
       update(u: ViewUpdate) {
-        if (u.docChanged || u.selectionSet || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state))
+        if (
+          u.docChanged ||
+          u.selectionSet ||
+          u.viewportChanged ||
+          syntaxTree(u.startState) !== syntaxTree(u.state) ||
+          foldedRanges(u.startState) !== foldedRanges(u.state)
+        )
           this.decorations = build(u.view, opts);
       }
     },

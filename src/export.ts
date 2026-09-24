@@ -138,7 +138,8 @@ body.toc-top .toc, body.toc-sidebar .toc { padding-bottom: 16px; border-bottom: 
 export async function buildHtml(body: HTMLElement, fallbackTitle: string, opts: ExportOptions): Promise<string> {
   await settled(body);
   const clone = body.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll(".code-copy").forEach((el) => el.remove());
+  clone.querySelectorAll(".code-copy, .heading-fold").forEach((el) => el.remove());
+  clone.querySelectorAll(".fold-hidden, .folded").forEach((el) => el.classList.remove("fold-hidden", "folded"));
   if (!opts.frontmatter) clone.querySelectorAll(".frontmatter").forEach((el) => el.remove());
   await themeDiagrams(clone, opts.theme);
   clone.querySelectorAll("[data-line], [data-rendered], [data-task-line], [data-source]").forEach((el) => {

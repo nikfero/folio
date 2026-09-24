@@ -1,6 +1,7 @@
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { EditorState, Text } from "@codemirror/state";
 import { openSearchPanel } from "@codemirror/search";
+import { foldAll, unfoldAll } from "@codemirror/language";
 import { redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion } from "@tauri-apps/api/app";
@@ -194,6 +195,8 @@ export class App {
     "toggle-auto-reload": () => this.toggleAutoReload(),
     "toggle-focus": () => this.setFocusMode(!this.focusMode),
     "toggle-fullscreen": () => this.toggleFullscreen(),
+    "fold-all": () => this.foldAll(true),
+    "unfold-all": () => this.foldAll(false),
     "export-html": () => this.exportHtml(),
     print: () => this.print(),
     "format-bold": () => this.format((v) => toggleInline(v, "**")),
@@ -716,6 +719,8 @@ export class App {
       ["mode-edit", "View: Edit"],
       ["cycle-mode", "View: Cycle Read / Live / Split / Edit", keys("E")],
       ["toggle-sidebar", "Toggle Sidebar", keys("\\")],
+      ["fold-all", "Fold All Sections", isMac ? "⌘⌥[" : "Ctrl+Alt+["],
+      ["unfold-all", "Unfold All Sections", isMac ? "⌘⌥]" : "Ctrl+Alt+]"],
       ["show-files", "Show Files"],
       ["toggle-outline", "Show Outline", keys("Shift+O")],
       ["find", "Find", keys("F")],
@@ -1061,7 +1066,10 @@ export class App {
         // Near the end a heading can't reach the top, so remember what was picked.
         const pick = (this.tocPick = { line, top: NaN });
         if (editorOnly(this.active?.mode)) revealLine(this.view, line);
-        else h.scrollIntoView({ block: "start" });
+        else {
+          this.preview.reveal(h);
+          h.scrollIntoView({ block: "start" });
+        }
         this.updateTocActive();
         setTimeout(() => {
           if (this.tocPick === pick) pick.top = this.tocScroller().scrollTop;
@@ -1393,6 +1401,14 @@ export class App {
     } else {
       document.documentElement.classList.remove("focus-bar-shown");
     }
+  }
+
+  /** Folds or unfolds every section in whichever panes are showing. */
+  private foldAll(fold: boolean): void {
+    const mode = this.active?.mode;
+    if (!mode) return;
+    if (mode !== "read") (fold ? foldAll : unfoldAll)(this.view);
+    if (!editorOnly(mode)) this.preview.foldAll(fold);
   }
 
   private async toggleFullscreen(): Promise<void> {
@@ -2021,6 +2037,8 @@ export class App {
         if (e.ctrlKey && key === "tab") id = e.shiftKey ? "prev-tab" : "next-tab";
         // Alt combinations: match the physical key (on macOS Option changes e.key).
         else if (primary && e.altKey && !e.shiftKey && e.code === "KeyO") id = "open-folder";
+        else if (primary && e.altKey && !this.view.hasFocus && (e.code === "BracketLeft" || e.code === "BracketRight"))
+          id = e.code === "BracketLeft" ? "fold-all" : "unfold-all"; // in the editor CodeMirror handles these
         else if (primary && !e.altKey) {
           id = shortcuts[(e.shiftKey ? "shift+" : "") + key];
           if (id === "find" && this.view.hasFocus) id = undefined; // CodeMirror's own search panel
