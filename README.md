@@ -4,13 +4,21 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 
 ## Features
 
-- **Read / Split / Edit** modes (<kbd>Ctrl</kbd>+<kbd>E</kbd> cycles) with synced scrolling in Split
+- **Four views** (<kbd>Ctrl</kbd>+<kbd>E</kbd> cycles):
+  - **Read**: the rendered document
+  - **Live**: edit with formatting shown in place; the Markdown syntax appears only where the cursor is, and the file is never rewritten
+  - **Split**: editor and preview side by side, scrolling together
+  - **Edit**: plain source
 - **Tabs** you can reorder by dragging, plus **Move Tab to New Window** and **New Window**
-- **Folders**: open a folder (or pass one on the command line, or drop it on the window) to browse its Markdown files in the sidebar; `.git`, `node_modules` and build folders are skipped
+- **Folders**: open a folder (or pass one on the command line, or drop it on the window) to browse its Markdown files in a resizable sidebar; `.git`, `node_modules` and build folders are skipped
+- **File actions** in the folder tree: new file, new folder, rename, and move to the Recycle Bin / Trash (never deleted outright)
+- **Search in Folder** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd>): text or regular expressions, optional case matching, results grouped per file
 - **Go to File** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>P</kbd>) with fuzzy search, and a **Command Palette** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>, or type `>` in Go to File)
 - **Change detection**: when another program (git, an AI agent, another editor) changes an open file, Folio shows a banner with **Reload** / **Ignore**. Automatic reloading can be turned on for all files in Settings, or per file with the **Auto-reload** toggle in the status bar; it never discards unsaved edits
 - GitHub-flavored Markdown: tables, task lists, footnotes, autolinks, syntax-highlighted code with a copy button
 - **Clickable checkboxes** that update (and save) the source file
+- **Editing helpers**: shortcuts for bold, italic, inline code, strikethrough and links; paste a URL over text to link it; paste or drop an image to save it into `images/` next to the document; align table columns
+- **Export** a standalone HTML file (styles and local images embedded), or **Print / Save as PDF**
 - **Jump to source**: <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+click in the preview (or double-click in Split) moves the editor to that line
 - **Math** (KaTeX) and **Mermaid** diagrams, loaded only when a document uses them
 - YAML frontmatter shown as a tidy metadata table
@@ -33,15 +41,25 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 | New window | Ctrl+Shift+N | ⌘⇧N |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | same |
 | Go to tab 1–9 | Ctrl+1…9 | ⌘1…9 |
-| Cycle Read / Split / Edit | Ctrl+E | ⌘E |
+| Cycle Read / Live / Split / Edit | Ctrl+E | ⌘E |
 | Go to file | Ctrl+P | ⌘P |
 | Command palette | Ctrl+Shift+P | ⌘⇧P |
-| Open folder | Ctrl+Shift+F | ⌘⇧F |
+| Open folder | Ctrl+Alt+O | ⌘⌥O |
+| Search in folder | Ctrl+Shift+F | ⌘⇧F |
 | Toggle sidebar | Ctrl+\ | ⌘\ |
 | Show outline | Ctrl+Shift+O | ⌘⇧O |
 | Find | Ctrl+F | ⌘F |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | ⌘= / ⌘- / ⌘0 |
 | Settings | Ctrl+, | ⌘, |
+
+In the editor:
+
+| Action | Windows / Linux | macOS |
+|---|---|---|
+| Bold / Italic | Ctrl+B / Ctrl+I | ⌘B / ⌘I |
+| Inline code / Strikethrough | Ctrl+\` / Ctrl+Shift+X | ⌘\` / ⌘⇧X |
+| Link | Ctrl+K | ⌘K |
+| Align table columns | Shift+Alt+F | ⇧⌥F |
 
 ## Development
 
@@ -61,13 +79,20 @@ npm run tauri build        # build an installer for this OS
 
 ```
 src/                 frontend (TypeScript, no framework)
-  app.ts             tabs, modes, open/save, reload, shortcuts, window handling
+  app.ts             tabs, modes, open/save, reload, commands, shortcuts, windows
   editor.ts          CodeMirror 6 setup
+  editing.ts         formatting commands and table alignment
+  livepreview.ts     Live mode (Markdown rendered inside the editor)
   markdown.ts        markdown-it setup and plugins (task lists, math, source lines)
   preview.ts         rendering, sanitizing, links, images, lazy math and diagrams
-  scrollsync.ts      editor ↔ preview position mapping
+  filetree.ts        folder tree in the sidebar
+  search.ts          Search in Folder panel
+  palette.ts         Go to File / command palette
+  export.ts          standalone HTML export
+  scrollsync.ts      editor <-> preview position mapping
   lazy/              KaTeX and Mermaid, loaded on demand
-src-tauri/           Rust backend: file I/O, single instance, file hand-off between windows
+src-tauri/           Rust backend: file I/O, folder listing and search, file
+                     actions, image saving, menus, single instance, windows
 .github/workflows/   CI and cross-platform release builds
 ```
 

@@ -193,10 +193,22 @@ fn utf16_len(s: &str) -> usize {
     s.encode_utf16().count()
 }
 
+/// Escapes a literal query. Case-insensitively, the Turkish dotted and dotless
+/// i (İ ı) also match i and I, which Unicode's simple case folding doesn't do.
+fn literal_pattern(query: &str, case_insensitive: bool) -> String {
+    query
+        .chars()
+        .map(|c| match c {
+            'i' | 'I' | 'İ' | 'ı' if case_insensitive => "[iIİı]".to_string(),
+            _ => regex::escape(&c.to_string()),
+        })
+        .collect()
+}
+
 /// Searches the folder's Markdown files for `query` (literal unless `regex`).
 #[tauri::command(async)]
 fn search_folder(root: String, query: String, case_sensitive: bool, regex: bool) -> Result<SearchResults, String> {
-    let pattern = if regex { query } else { regex::escape(&query) };
+    let pattern = if regex { query } else { literal_pattern(&query, !case_sensitive) };
     let re = regex::RegexBuilder::new(&pattern)
         .case_insensitive(!case_sensitive)
         .size_limit(1 << 20)
@@ -672,4 +684,103 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh scratch folder under the system temp directory.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("folio-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn s(p: &Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn lists_markdown_and_skips_noise() {
+        let dir = scratch("list");
+        std::fs::create_dir_all(dir.join("docs/deep")).unwrap();
+        std::fs::create_dir_all(dir.join("node_modules/pkg")).unwrap();
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        std::fs::create_dir_all(dir.join("empty")).unwrap();
+        std::fs::write(dir.join("README.md"), "# hi").unwrap();
+        std::fs::write(dir.join("docs/deep/Guide.MD"), "x").unwrap();
+        std::fs::write(dir.join("docs/notes.txt"), "x").unwrap();
+        std::fs::write(dir.join("node_modules/pkg/readme.md"), "x").unwrap();
+        std::fs::write(dir.join(".git/info.md"), "x").unwrap();
+
+        let listing = list_folder(s(&dir)).unwrap();
+        let rels: Vec<_> = listing.files.iter().map(|f| f.rel.as_str()).collect();
+        assert_eq!(rels, ["docs/deep/Guide.MD", "README.md"]);
+        assert_eq!(listing.dirs, ["empty"]);
+        assert!(!listing.truncated);
+    }
+
+    #[test]
+    fn searches_with_unicode_case_folding_and_utf16_offsets() {
+        let dir = scratch("search");
+        // "é" and "😀" are multi-byte in UTF-8; offsets must be UTF-16 for JavaScript.
+        std::fs::write(dir.join("a.md"), "Café 😀 İstanbul\r\nsecond ISTANBUL line\n").unwrap();
+        let r = search_folder(s(&dir), "istanbul".into(), false, false).unwrap();
+        assert_eq!(r.total, 2);
+        let m = &r.files[0].matches;
+        assert_eq!((m[0].line, m[0].col), (1, 8)); // "Café " (5) + "😀" (2) + " " (1)
+        assert_eq!(m[1].line, 2);
+        assert!(!m[1].text.ends_with('\r'));
+
+        let literal = search_folder(s(&dir), "a.".into(), false, false).unwrap();
+        assert_eq!(literal.total, 0, "query is literal unless regex is on");
+        let re = search_folder(s(&dir), "caf.".into(), false, true).unwrap();
+        assert_eq!(re.total, 1);
+        assert!(search_folder(s(&dir), "(".into(), false, true).is_err());
+    }
+
+    #[test]
+    fn create_and_rename_never_overwrite() {
+        let dir = scratch("ops");
+        let a = dir.join("a.md");
+        let b = dir.join("b.md");
+        create_file(s(&a)).unwrap();
+        assert!(create_file(s(&a)).is_err(), "create_file must not overwrite");
+        std::fs::write(&b, "keep me").unwrap();
+        assert!(rename_path(s(&a), s(&b)).is_err(), "rename must not overwrite");
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), "keep me");
+
+        rename_path(s(&a), s(&dir.join("c.md"))).unwrap();
+        assert!(dir.join("c.md").exists() && !a.exists());
+
+        create_dir(s(&dir.join("sub"))).unwrap();
+        assert!(create_dir(s(&dir.join("sub"))).is_err());
+    }
+
+    #[test]
+    fn saves_pasted_images_with_unique_names() {
+        use base64::Engine;
+        let dir = scratch("img");
+        let data = base64::engine::general_purpose::STANDARD.encode([1u8, 2, 3]);
+        let first = save_image(s(&dir), "shot.png".into(), data.clone()).unwrap();
+        let second = save_image(s(&dir), "shot.png".into(), data).unwrap();
+        assert_eq!(first, "images/shot.png");
+        assert_eq!(second, "images/shot-2.png");
+        assert_eq!(std::fs::read(dir.join("images/shot-2.png")).unwrap(), [1, 2, 3]);
+        let odd = save_image(s(&dir), "my file?.png".into(), "AQ==".into()).unwrap();
+        assert_eq!(odd, "images/my-file-.png");
+    }
+
+    #[test]
+    fn keeps_bom_and_text_exactly() {
+        let dir = scratch("bom");
+        let path = s(&dir.join("x.md"));
+        write_text(path.clone(), "a\r\nb".into(), true).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"\xEF\xBB\xBFa\r\nb");
+        let f = read_text(path).unwrap();
+        assert!(f.bom);
+        assert_eq!(f.text, "a\r\nb");
+    }
 }
