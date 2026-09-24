@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
@@ -357,6 +357,70 @@ fn unique_image_path(dir: &Path, file_name: &str) -> Result<(PathBuf, String), S
     Ok((images.join(&name), format!("images/{name}")))
 }
 
+// ------------------------------------------------------------ recovery
+//
+// Unsaved changes are copied to <app data>/recovery/<id>.json a moment after
+// each edit and removed once the document is saved or discarded, so a crash or
+// power cut loses at most a second of typing. Files left over from an earlier
+// run are offered back when Folio starts.
+
+/// When this run started: recovery files older than this are from a previous run.
+static STARTED: OnceLock<SystemTime> = OnceLock::new();
+
+fn recovery_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("recovery");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn recovery_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("invalid recovery id".into());
+    }
+    Ok(recovery_dir(app)?.join(format!("{id}.json")))
+}
+
+#[tauri::command]
+fn recovery_save(app: AppHandle, id: String, data: String) -> Result<(), String> {
+    let path = recovery_file(&app, &id)?;
+    // Write then rename, so a crash mid-write never leaves a half file.
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, data).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn recovery_remove(app: AppHandle, id: String) -> Result<(), String> {
+    match std::fs::remove_file(recovery_file(&app, &id)?) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => Ok(()),
+    }
+}
+
+/// Recovery files left by an earlier run (never those of windows open now).
+#[tauri::command]
+fn recovery_list(app: AppHandle) -> Result<Vec<String>, String> {
+    let started = *STARTED.get_or_init(SystemTime::now);
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(recovery_dir(&app)?).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "json") {
+            continue;
+        }
+        let old = entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| t < started);
+        if old {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                out.push(text);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Modification time in ms, or None if the file no longer exists.
 #[tauri::command]
 fn file_mtime(path: String) -> Option<u64> {
@@ -672,6 +736,7 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            STARTED.get_or_init(SystemTime::now);
             let pref = load_menu_pref(app.handle());
             app.state::<MenuBarPref>().0.store(pref, Ordering::Relaxed);
             // macOS has one global menu bar; elsewhere each window gets its own (if enabled).
@@ -701,6 +766,9 @@ pub fn run() {
             trash_path,
             save_image,
             copy_image,
+            recovery_save,
+            recovery_remove,
+            recovery_list,
             new_window,
             menu_visible,
             set_menu_visible

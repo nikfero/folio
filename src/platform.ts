@@ -138,6 +138,29 @@ export async function saveImage(dir: string, fileName: string, data: ArrayBuffer
   return invoke<string>("save_image", { dir, fileName, data: btoa(binary) });
 }
 
+/** Unsaved changes kept on disk so they survive a crash. */
+export interface Recovery {
+  id: string;
+  path: string | null;
+  content: string;
+  time: number;
+}
+export const recoverySave = (r: Recovery) => invoke<void>("recovery_save", { id: r.id, data: JSON.stringify(r) });
+export const recoveryRemove = (id: string) => invoke<void>("recovery_remove", { id });
+/** Recovery files left by an earlier run. */
+export async function recoveryList(): Promise<Recovery[]> {
+  const out: Recovery[] = [];
+  for (const text of await invoke<string[]>("recovery_list")) {
+    try {
+      const r = JSON.parse(text) as Recovery;
+      if (typeof r.id === "string" && typeof r.content === "string") out.push(r);
+    } catch {
+      /* unreadable: ignore */
+    }
+  }
+  return out;
+}
+
 /** Copies an image file into `<dir>/images/`; returns the path relative to `dir`. */
 export const copyImage = (dir: string, source: string) => invoke<string>("copy_image", { dir, source });
 

@@ -77,6 +77,9 @@ const under = (p: string, dir: string) => p.toLowerCase().startsWith(dir.toLower
 
 export function installMock(): void {
   mockWindows("main");
+  // Recovery files survive a page reload, which stands in for a crash and restart.
+  const previous = JSON.parse(localStorage.getItem("mock.recovery") ?? "{}") as Record<string, string>;
+  const recovery = { previous, now: { ...previous } };
   mockConvertFileSrc("windows");
   mockIPC(
     (cmd, payload) => {
@@ -172,6 +175,17 @@ export function installMock(): void {
           return `images/${String(args.fileName)}`;
         case "plugin:dialog|save":
           return "C:\\docs\\new-file.md";
+        case "recovery_save":
+          recovery.now[args.id as string] = args.data as string;
+          localStorage.setItem("mock.recovery", JSON.stringify(recovery.now));
+          return null;
+        case "recovery_remove":
+          delete recovery.now[args.id as string];
+          delete recovery.previous[args.id as string];
+          localStorage.setItem("mock.recovery", JSON.stringify(recovery.now));
+          return null;
+        case "recovery_list":
+          return Object.values(recovery.previous);
         case "copy_image":
           return `images/${String((args as { source: string }).source).split(/[\\/]/).pop()}`;
         case "plugin:opener|open_url":

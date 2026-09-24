@@ -65,6 +65,10 @@ import {
   ltr,
   newWindow,
   pathKey,
+  recoveryList,
+  recoveryRemove,
+  recoverySave,
+  type Recovery,
   readClipboard,
   writeClipboard,
   readText,
@@ -96,6 +100,10 @@ interface Tab {
   /** Fractional 0-based source line at the top of the view, restored on activation. */
   topLine: number;
   autoSaveTimer: number;
+  /** Name of this tab's recovery file, and whether one is on disk. */
+  recoveryId: string;
+  recoverySaved: boolean;
+  recoveryTimer: number;
 }
 
 const mod = isMac ? "⌘" : "Ctrl+";
@@ -278,6 +286,7 @@ export class App {
     } finally {
       this.restoring = false;
     }
+    await this.recoverUnsaved();
     await this.openRequests(await frontendReady());
     setInterval(() => void this.pollDisk(), 1500);
   }
@@ -337,6 +346,9 @@ export class App {
       saving: false,
       topLine: 0,
       autoSaveTimer: 0,
+      recoveryId: crypto.randomUUID(),
+      recoverySaved: false,
+      recoveryTimer: 0,
       ...opts,
     };
     // Reuse a blank, untouched "Untitled" tab instead of piling up empty ones.
@@ -395,6 +407,7 @@ export class App {
     const i = this.tabs.indexOf(tab);
     if (i < 0) return;
     this.tabs.splice(i, 1);
+    this.dropRecovery(tab);
     if (this.active === tab) {
       this.active = null;
       const next = this.tabs[Math.min(i, this.tabs.length - 1)];
@@ -437,7 +450,7 @@ export class App {
         const tab = await this.openPath(d.path);
         if (tab && d.content != null) this.replaceDoc(tab, d.content, false);
       } else if (d.content != null) {
-        this.createTab(null, d.content);
+        this.replaceDoc(this.createTab(null, ""), d.content, false); // still unsaved
       }
     }
   }
@@ -496,6 +509,50 @@ export class App {
       active: Math.max(0, this.active ? saved.indexOf(this.active) : 0),
       folder: this.fileTree.folder,
     });
+  }
+
+  // -------------------------------------------------------------- recovery
+
+  /** Keeps a copy of a dirty tab's text on disk (a second after the last edit); removes it once clean. */
+  private scheduleRecovery(tab: Tab): void {
+    clearTimeout(tab.recoveryTimer);
+    tab.recoveryTimer = window.setTimeout(() => {
+      if (!this.tabs.includes(tab)) return;
+      if (this.isDirty(tab)) {
+        tab.recoverySaved = true;
+        void recoverySave({ id: tab.recoveryId, path: tab.path, content: tab.state.doc.toString(), time: Date.now() }).catch(
+          () => (tab.recoverySaved = false),
+        );
+      } else void this.dropRecovery(tab);
+    }, 1000);
+  }
+
+  private async dropRecovery(tab: Tab): Promise<void> {
+    clearTimeout(tab.recoveryTimer);
+    if (!tab.recoverySaved) return;
+    tab.recoverySaved = false;
+    await recoveryRemove(tab.recoveryId).catch(() => {});
+  }
+
+  /** Reopens unsaved changes left by a crash (or a forced quit) in the last run. */
+  private async recoverUnsaved(): Promise<void> {
+    if (this.win.label !== "main") return;
+    const found = await recoveryList().catch(() => [] as Recovery[]);
+    if (!found.length) return;
+    found.sort((a, b) => a.time - b.time);
+    let count = 0;
+    for (const r of found) {
+      let tab: Tab | null = null;
+      if (r.path) tab = await this.openPath(r.path, { quiet: true });
+      if (!tab && r.content.trim()) tab = this.createTab(null, "");
+      if (tab) this.replaceDoc(tab, r.content, false);
+      if (tab && this.isDirty(tab)) count++;
+      await recoveryRemove(r.id).catch(() => {});
+    }
+    if (count)
+      toast(
+        `Recovered unsaved changes in ${count === 1 ? "1 document" : `${count} documents`} from the last session. Save them to keep them.`,
+      );
   }
 
   // ---------------------------------------------------------------- folder
@@ -801,6 +858,7 @@ export class App {
     try {
       tab.mtime = await writeText(tab.path, text, tab.bom);
       tab.savedDoc = doc;
+      this.scheduleRecovery(tab);
       tab.external = null;
       this.refreshUi();
       if (this.fileTree.contains(tab.path)) this.searchPanel.refresh();
@@ -836,6 +894,7 @@ export class App {
     }
     if (asSaved) tab.savedDoc = tab.state.doc;
     if (tab !== this.active) this.refreshUi();
+    this.scheduleRecovery(tab);
   }
 
   async reloadFromDisk(tab: Tab | null = this.active): Promise<void> {
@@ -899,6 +958,7 @@ export class App {
     if (u.docChanged) {
       this.scheduleRender();
       this.refreshUi();
+      this.scheduleRecovery(tab);
       if (settings.get("autoSave") && tab.path && !tab.external) {
         clearTimeout(tab.autoSaveTimer);
         tab.autoSaveTimer = window.setTimeout(() => {
@@ -2228,6 +2288,7 @@ export class App {
         if (choice === "cancel") return;
         if (choice === "save" && !(await this.save(tab))) return;
       }
+      await Promise.all(this.tabs.map((t) => this.dropRecovery(t)));
       await this.win.destroy();
     });
   }
