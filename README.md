@@ -63,6 +63,6 @@ src-tauri/           Rust backend: file I/O, single instance, file hand-off betw
 
 ## Releases
 
-Push a tag such as `v0.1.0` (or run the **Release** workflow by hand) and GitHub Actions builds installers for Windows (`.msi`, `.exe`), macOS (`.dmg` for Apple Silicon and Intel) and Linux (`.deb`, `.rpm`, `.AppImage`), attached to a draft release.
+GitHub Actions builds installers for Windows (`.msi`, `.exe`), macOS (`.dmg` for Apple Silicon and Intel) and Linux (`.deb`, `.rpm`, `.AppImage`) into a draft release. You can start a release from the GitHub website or by pushing a `v*` tag.
 
-The builds aren't code-signed yet, so Windows SmartScreen and macOS Gatekeeper will warn the first time you open them.
+See **[docs/RELEASING.md](docs/RELEASING.md)** for step-by-step instructions, troubleshooting, and notes on unsigned builds.
