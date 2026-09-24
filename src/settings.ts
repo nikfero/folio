@@ -22,6 +22,7 @@ export interface Settings {
   previewFont: "sans" | "serif";
   previewWidth: "narrow" | "medium" | "wide" | "full";
   exportOptions: Partial<ExportOptions>;
+  focusDim: boolean;
 }
 
 const defaults: Settings = {
@@ -42,6 +43,7 @@ const defaults: Settings = {
   previewFont: "sans",
   previewWidth: "medium",
   exportOptions: {},
+  focusDim: true,
 };
 
 const PREFIX = "folio.";

@@ -1592,3 +1592,56 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
 .export-options select:disabled {
   opacity: 0.5;
 }
+
+/* ------------------------------------------------------------- focus mode */
+
+.focus-mode #topbar,
+.focus-mode #statusbar,
+.focus-mode #toc,
+.focus-mode #sidebar-resizer {
+  display: none !important;
+}
+.focus-mode #editor-pane .cm-content {
+  max-width: var(--content-width, 820px);
+  margin: 0 auto;
+}
+.focus-mode #editor-pane .cm-gutters {
+  display: none;
+}
+.focus-mode .cm-activeLine {
+  background: transparent;
+}
+.cm-focus-dim .cm-line,
+.cm-focus-dim .cm-live-block {
+  opacity: 0.28;
+  transition: opacity 0.2s;
+}
+.cm-focus-dim .cm-line.cm-focus-current {
+  opacity: 1;
+}
+/* A hint to leave focus mode, shown when the pointer reaches the top edge. */
+#focus-exit {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  height: 44px;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.focus-mode #focus-exit {
+  display: flex;
+}
+.focus-mode #focus-exit:hover {
+  opacity: 1;
+}
+#focus-exit .btn {
+  box-shadow: var(--shadow);
+}
+#focus-exit kbd {
+  margin-left: 6px;
+}

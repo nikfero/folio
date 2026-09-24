@@ -496,6 +496,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&item("command-palette", "Command Palette…", Some("CmdOrCtrl+Shift+P"))?)
         .separator()
         .item(&item("toggle-sidebar", "Toggle Sidebar", Some("CmdOrCtrl+\\"))?)
+        .item(&item("toggle-focus", "Focus Mode", Some("F11"))?)
         .item(&item("show-files", "Show Files", None)?)
         .item(&item("search-folder", "Search in Folder", Some("CmdOrCtrl+Shift+F"))?)
         .item(&item("toggle-outline", "Show Outline", Some("CmdOrCtrl+Shift+O"))?)

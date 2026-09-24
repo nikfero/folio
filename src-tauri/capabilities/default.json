@@ -10,6 +10,7 @@
     "core:window:allow-close",
     "core:window:allow-set-focus",
     "core:window:allow-show",
+    "core:window:allow-set-fullscreen",
     "dialog:default",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",

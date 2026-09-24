@@ -15,6 +15,7 @@ import { HighlightStyle, syntaxHighlighting, indentOnInput, bracketMatching } fr
 import { markdown, markdownLanguage, pasteURLAsLink } from "@codemirror/lang-markdown";
 import { formatTable, insertLink, toggleInline } from "./editing";
 import { livePreview, type LiveOptions } from "./livepreview";
+import { focusDimming } from "./focus";
 export { refreshLiveBlocks } from "./liveblocks";
 import { readClipboard } from "./platform";
 import { languages } from "@codemirror/language-data";
@@ -138,6 +139,14 @@ let config: EditorConfig = { lineNumbers: true, wrapLines: true };
 const gutter = new Compartment();
 const wrap = new Compartment();
 const live = new Compartment();
+const focus = new Compartment();
+const focusExt = focusDimming();
+
+/** Turns paragraph dimming (focus mode) on or off for the editor's current document. */
+export function setFocusDim(view: EditorView, on: boolean): void {
+  const isOn = focus.get(view.state) === focusExt;
+  if (isOn !== on) view.dispatch({ effects: focus.reconfigure(on ? focusExt : []) });
+}
 let liveExt: Extension = [];
 
 /** Sets up live preview (call once, before the editor is used). */
@@ -157,6 +166,7 @@ const extensions = (): Extension[] => [
   gutter.of(gutterExt(config.lineNumbers)),
   wrap.of(wrapExt(config.wrapLines)),
   live.of([]),
+  focus.of([]),
   highlightActiveLine(),
   history(),
   drawSelection(),

@@ -61,6 +61,7 @@ function sections(opts: { menuBar: boolean }): Section[] {
         },
         { key: "lineNumbers", label: "Line numbers" },
         { key: "wrapLines", label: "Wrap long lines" },
+        { key: "focusDim", label: "Dim other paragraphs in focus mode", hint: "Focus mode (F11) hides everything but the text" },
       ],
     },
     {

@@ -16,8 +16,10 @@ import {
   onImagePaste,
   refreshLiveBlocks,
   setEditorConfig,
+  setFocusDim,
   setLive,
 } from "./editor";
+import { isPaletteOpen } from "./palette";
 import { formatTable, insertLink, tableAt, toggleInline } from "./editing";
 import { Preview } from "./preview";
 import { ScrollMap, editorTopLine, revealLine, scrollEditorToLine } from "./scrollsync";
@@ -145,6 +147,8 @@ export class App {
   private tocHeadings: { line: number; el: HTMLElement }[] = [];
   private wordCount = 0;
   private restoring = true;
+  private focusMode = false;
+  private focusWentFullscreen = false;
   private version = "dev";
 
   /** Every user-facing action, addressed by the same ids as the native menu items. */
@@ -181,6 +185,7 @@ export class App {
     "prev-tab": () => this.cycleTab(-1),
     "move-tab": () => this.active && this.moveToNewWindow(this.active),
     "toggle-auto-reload": () => this.toggleAutoReload(),
+    "toggle-focus": () => this.setFocusMode(!this.focusMode),
     "export-html": () => this.exportHtml(),
     print: () => this.print(),
     "format-bold": () => this.format((v) => toggleInline(v, "**")),
@@ -709,6 +714,7 @@ export class App {
       ["next-tab", "Next Tab", "Ctrl+Tab"],
       ["prev-tab", "Previous Tab", "Ctrl+Shift+Tab"],
       ["toggle-theme", "Toggle Light / Dark Theme"],
+      ["toggle-focus", "Toggle Focus Mode", "F11"],
       ["zoom-in", "Zoom In", keys("=")],
       ["zoom-out", "Zoom Out", keys("-")],
       ["zoom-reset", "Actual Size", keys("0")],
@@ -1006,7 +1012,10 @@ export class App {
 
   private applyMode(): void {
     const mode = this.active?.mode ?? "read";
-    if (this.active) setLive(this.view, mode === "live");
+    if (this.active) {
+      setLive(this.view, mode === "live");
+      setFocusDim(this.view, this.focusMode && settings.get("focusDim") && editorOnly(mode));
+    }
     this.workspace.dataset.mode = this.active ? mode : "none";
     for (const b of document.querySelectorAll<HTMLElement>("#modes button"))
       b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
@@ -1233,6 +1242,7 @@ export class App {
     this.workspace.style.setProperty("--split", String(settings.get("split")));
     this.scrollMap.invalidate();
     this.updateStatus(); // the auto-reload indicator follows the global default
+    this.applyMode(); // focus dimming follows its setting
   }
 
   private showSettings(): void {
@@ -1280,6 +1290,7 @@ export class App {
       item("Command Palette…", "command-palette", keys("Shift+P")),
       item("Find", "find", keys("F"), !tab),
       item("Toggle Sidebar", "toggle-sidebar", keys("\\")),
+      item("Focus Mode", "toggle-focus", "F11", !tab),
       item("Reload from Disk", "reload", undefined, !tab?.path),
       item("Reveal in Folder", "reveal", undefined, !tab?.path),
       "separator",
@@ -1319,6 +1330,31 @@ export class App {
         action: () => tab.path && void revealItemInDir(tab.path).catch((e) => toast(String(e), "error")),
       },
     ];
+  }
+
+  // ------------------------------------------------------------ focus mode
+
+  /** Full screen with only the text: no tabs, toolbar, sidebar or status bar. */
+  private async setFocusMode(on: boolean): Promise<void> {
+    if (on === this.focusMode) return;
+    this.focusMode = on;
+    document.documentElement.classList.toggle("focus-mode", on);
+    closeMenu();
+    if (on && this.find.isOpen) this.find.close();
+    this.applyMode();
+    try {
+      if (on) {
+        this.focusWentFullscreen = !(await this.win.isFullscreen());
+        if (this.focusWentFullscreen) await this.win.setFullscreen(true);
+      } else if (this.focusWentFullscreen) {
+        await this.win.setFullscreen(false);
+      }
+    } catch {
+      /* full screen isn't essential */
+    }
+    this.scrollMap.invalidate();
+    if (on && this.active && this.active.mode !== "read") this.view.focus();
+    if (on) this.flash("Focus mode: press Esc to exit");
   }
 
   // ---------------------------------------------------------------- export
@@ -1618,6 +1654,7 @@ export class App {
     $("#welcome-open").addEventListener("click", () => void this.openFileDialog());
     $("#welcome-new").addEventListener("click", () => this.newTab());
     $("#welcome-folder").addEventListener("click", () => void this.openFolderDialog());
+    $("#focus-exit").addEventListener("click", () => void this.setFocusMode(false));
     document.addEventListener("contextmenu", (e) => this.onContextMenu(e));
     for (const b of this.tocEl.querySelectorAll<HTMLElement>(".sidebar-tabs button"))
       b.addEventListener("click", () => this.showPanel(b.dataset.panel as "files" | "search" | "outline", false));
@@ -1813,6 +1850,19 @@ export class App {
         if (key === "escape" && this.find.isOpen) {
           stop();
           return this.find.close();
+        }
+        if (key === "f11") {
+          stop();
+          return this.runCommand("toggle-focus", "key");
+        }
+        if (
+          key === "escape" &&
+          this.focusMode &&
+          !isPaletteOpen() &&
+          !document.querySelector(".modal-backdrop, .menu, .cm-panels")
+        ) {
+          stop();
+          return void this.setFocusMode(false);
         }
 
         let id: string | undefined;
