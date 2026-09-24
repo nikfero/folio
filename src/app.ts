@@ -15,6 +15,8 @@ import { icons } from "./icons";
 import { closeMenu, confirmUnsaved, dialog, showMenu, toast, type MenuEntry } from "./ui";
 import * as settings from "./settings";
 import { openSettings } from "./settings-panel";
+import { FileTree } from "./filetree";
+import { openPalette, type PaletteItem, type PaletteSource } from "./palette";
 import {
   MARKDOWN_EXTS,
   basename,
@@ -23,6 +25,7 @@ import {
   frontendReady,
   isMac,
   isMarkdownPath,
+  listFolder,
   newWindow,
   pathKey,
   readText,
@@ -54,6 +57,8 @@ interface Tab {
 }
 
 const mod = isMac ? "⌘" : "Ctrl+";
+/** Formats a shortcut like "Shift+P" for the current OS ("⌘⇧P" or "Ctrl+Shift+P"). */
+const keys = (combo: string) => (isMac ? `⌘${combo.replace("Shift+", "⇧")}` : `Ctrl+${combo}`);
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const SERIF = 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif';
 const WIDTHS = { narrow: "680px", medium: "820px", wide: "1040px", full: "none" } as const;
@@ -79,6 +84,10 @@ export class App {
   private previewPane = $("#preview-pane");
   private tocEl = $("#toc");
   private tocList = $("#toc-list");
+  private fileTree = new FileTree($("#files-panel"), {
+    open: (path) => void this.openPath(path),
+    openFolder: () => void this.openFolderDialog(),
+  });
   private banner = $("#banner");
   private welcome = $("#welcome");
 
@@ -106,7 +115,13 @@ export class App {
     "mode-split": () => this.setMode("split"),
     "mode-edit": () => this.setMode("edit"),
     "cycle-mode": () => this.cycleMode(),
-    "toggle-outline": () => this.toggleToc(),
+    "toggle-outline": () => this.showPanel("outline", true),
+    "show-files": () => this.showPanel("files", false),
+    "toggle-sidebar": () => this.setSidebar(this.tocEl.hidden === true),
+    "open-folder": () => this.openFolderDialog(),
+    "close-folder": () => this.setFolder(null),
+    "quick-open": () => this.quickOpen(),
+    "command-palette": () => this.commandPalette(),
     find: () => this.openFind(),
     "cycle-theme": () => this.cycleTheme(),
     "zoom-in": () => this.zoom(0.1),
@@ -294,7 +309,9 @@ export class App {
 
   async openRequests(docs: OpenRequest[]): Promise<void> {
     for (const d of docs) {
-      if (d.path) {
+      if (d.folder) {
+        await this.openFolder(d.folder);
+      } else if (d.path) {
         const tab = await this.openPath(d.path);
         if (tab && d.content != null) this.replaceDoc(tab, d.content, false);
       } else if (d.content != null) {
@@ -331,7 +348,8 @@ export class App {
   /** Reopens the main window's tabs from the last run. */
   private async restoreSession(): Promise<void> {
     if (this.win.label !== "main" || !settings.get("restoreSession")) return;
-    const { tabs, active } = settings.session();
+    const { tabs, active, folder } = settings.session();
+    if (folder) await this.openFolder(folder, true);
     const opened: (Tab | null)[] = [];
     for (const t of tabs)
       opened.push(await this.openPath(t.path, { quiet: true, tab: { mode: t.mode, topLine: t.topLine } }));
@@ -354,7 +372,131 @@ export class App {
     settings.saveSession({
       tabs: saved.map((t) => ({ path: t.path!, mode: t.mode, topLine: t.topLine })),
       active: Math.max(0, this.active ? saved.indexOf(this.active) : 0),
+      folder: this.fileTree.folder,
     });
+  }
+
+  // ---------------------------------------------------------------- folder
+
+  async openFolderDialog(): Promise<void> {
+    const picked = await openDialog({
+      directory: true,
+      defaultPath: this.fileTree.folder ?? (this.active?.path ? dirname(this.active.path) : undefined),
+    });
+    if (typeof picked === "string") await this.openFolder(picked);
+  }
+
+  /** Shows a folder in the sidebar. Returns false if it can't be listed. */
+  async openFolder(path: string, quiet = false): Promise<boolean> {
+    try {
+      const listing = await listFolder(path);
+      this.fileTree.setFolder(path, listing.files, listing.truncated);
+      this.fileTree.setActive(this.active?.path ?? null);
+      this.workspace.classList.add("has-folder");
+      if (!quiet) this.showPanel("files", false);
+      this.scheduleSessionSave();
+      return true;
+    } catch (e) {
+      if (!quiet) toast(`Couldn't open folder: ${e}`, "error");
+      return false;
+    }
+  }
+
+  private setFolder(path: null): void {
+    this.fileTree.setFolder(path, []);
+    this.workspace.classList.remove("has-folder");
+    if (settings.get("sidebarPanel") === "files") this.showPanel("outline", false);
+    this.scheduleSessionSave();
+  }
+
+  private refreshingFolder = false;
+
+  /** Re-reads the open folder so new, renamed and deleted files show up. */
+  private async refreshFolder(): Promise<void> {
+    const folder = this.fileTree.folder;
+    if (!folder || this.refreshingFolder || document.visibilityState !== "visible") return;
+    this.refreshingFolder = true;
+    try {
+      const listing = await listFolder(folder);
+      if (this.fileTree.folder === folder) this.fileTree.setFolder(folder, listing.files, listing.truncated);
+    } catch {
+      /* folder gone; keep showing the last listing */
+    } finally {
+      this.refreshingFolder = false;
+    }
+  }
+
+  // --------------------------------------------------------------- palette
+
+  private quickOpen(): void {
+    const seen = new Set<string>();
+    const fileItem = (path: string, detail: string, hint?: string): PaletteItem | null => {
+      const key = pathKey(path);
+      if (seen.has(key)) return null;
+      seen.add(key);
+      return { label: basename(path), detail, hint, run: () => void this.openPath(path) };
+    };
+    const folder = this.fileTree.folder;
+    // Files inside the open folder show their folder relative to it; others their full folder.
+    const relDirs = new Map(this.fileTree.entries.map((f) => [pathKey(f.path), f.rel.split("/").slice(0, -1).join("/")]));
+    const where = (path: string) => relDirs.get(pathKey(path)) ?? dirname(path);
+    const source: PaletteSource = {
+      placeholder: folder ? `Go to a file in ${basename(folder)} (type > for commands)` : "Go to an open or recent file (type > for commands)",
+      empty: folder ? "No matching files" : "No matching files. Open a folder to search all of its files.",
+      items: () => {
+        seen.clear();
+        const items: (PaletteItem | null)[] = [];
+        for (const t of this.tabs) if (t.path) items.push(fileItem(t.path, where(t.path), "open"));
+        for (const f of this.fileTree.entries) items.push(fileItem(f.path, where(f.path)));
+        for (const r of settings.recent()) items.push(fileItem(r, where(r), "recent"));
+        return items.filter((i): i is PaletteItem => i !== null);
+      },
+      prefixes: { ">": this.commandSource() },
+    };
+    openPalette(source);
+  }
+
+  private commandPalette(): void {
+    openPalette({ ...this.commandSource(), prefixes: undefined }, "");
+  }
+
+  private commandSource(): PaletteSource {
+    const list: [id: string, label: string, shortcut?: string][] = [
+      ["quick-open", "Go to File…", keys("P")],
+      ["open", "Open File…", keys("O")],
+      ["open-folder", "Open Folder…", keys("Shift+F")],
+      ["close-folder", "Close Folder"],
+      ["new-tab", "New Tab", keys("T")],
+      ["new-window", "New Window", keys("Shift+N")],
+      ["save", "Save", keys("S")],
+      ["save-as", "Save As…", keys("Shift+S")],
+      ["close-tab", "Close Tab", keys("W")],
+      ["reload", "Reload from Disk"],
+      ["reveal", "Reveal in Folder"],
+      ["move-tab", "Move Tab to New Window"],
+      ["toggle-auto-reload", "Toggle Auto-reload for This File"],
+      ["mode-read", "View: Read"],
+      ["mode-split", "View: Split"],
+      ["mode-edit", "View: Edit"],
+      ["cycle-mode", "View: Cycle Read / Split / Edit", keys("E")],
+      ["toggle-sidebar", "Toggle Sidebar", keys("\\")],
+      ["show-files", "Show Files"],
+      ["toggle-outline", "Show Outline", keys("Shift+O")],
+      ["find", "Find", keys("F")],
+      ["next-tab", "Next Tab", "Ctrl+Tab"],
+      ["prev-tab", "Previous Tab", "Ctrl+Shift+Tab"],
+      ["cycle-theme", "Change Theme"],
+      ["zoom-in", "Zoom In", keys("=")],
+      ["zoom-out", "Zoom Out", keys("-")],
+      ["zoom-reset", "Actual Size", keys("0")],
+      ["settings", "Settings…", keys(",")],
+      ["about", "About Folio"],
+    ];
+    return {
+      placeholder: "Run a command",
+      empty: "No matching commands",
+      items: () => list.map(([id, label, hint]) => ({ label, hint, run: () => this.runCommand(id, "ui") })),
+    };
   }
 
   async openFileDialog(): Promise<void> {
@@ -662,7 +804,7 @@ export class App {
   }
 
   private updateTocActive(): void {
-    if (this.tocEl.hidden || !this.tocHeadings.length) return;
+    if (this.tocEl.hidden || this.tocEl.dataset.panel !== "outline" || !this.tocHeadings.length) return;
     const line =
       this.active?.mode === "edit"
         ? editorTopLine(this.view)
@@ -672,12 +814,30 @@ export class App {
     for (const h of this.tocHeadings) h.el.classList.toggle("active", h === current);
   }
 
-  private toggleToc(): void {
-    const show = this.tocEl.hidden === true;
-    this.tocEl.hidden = !show;
-    settings.set("toc", show);
+  private setSidebar(visible: boolean): void {
+    this.tocEl.hidden = !visible;
+    settings.set("toc", visible);
     this.scrollMap.invalidate();
     this.updateTocActive();
+  }
+
+  /**
+   * Shows a sidebar panel. With `toggle`, asking for the panel that is already
+   * showing hides the sidebar instead.
+   */
+  private showPanel(panel: "files" | "outline", toggle: boolean): void {
+    const showing = this.tocEl.hidden !== true && settings.get("sidebarPanel") === panel;
+    if (toggle && showing) return this.setSidebar(false);
+    settings.set("sidebarPanel", panel);
+    this.applySidebarPanel();
+    this.setSidebar(true);
+  }
+
+  private applySidebarPanel(): void {
+    const panel = settings.get("sidebarPanel");
+    this.tocEl.dataset.panel = panel;
+    for (const b of this.tocEl.querySelectorAll<HTMLElement>(".sidebar-tabs button"))
+      b.setAttribute("aria-selected", String(b.dataset.panel === panel));
   }
 
   // -------------------------------------------------------------------- UI
@@ -688,6 +848,7 @@ export class App {
     this.applyMode();
     this.renderBanner();
     this.updateStatus();
+    this.fileTree.setActive(this.active?.path ?? null);
     this.welcome.hidden = this.tabs.length > 0;
     if (!this.tabs.length) this.renderWelcome();
     const tab = this.active;
@@ -822,6 +983,7 @@ export class App {
     this.view.dispatch({ effects });
     for (const t of this.tabs) if (t !== this.active) t.state = t.state.update({ effects }).state;
     this.tocEl.hidden = !settings.get("toc");
+    this.applySidebarPanel();
     this.workspace.style.setProperty("--split", String(settings.get("split")));
     this.scrollMap.invalidate();
     this.updateStatus(); // the auto-reload indicator follows the global default
@@ -856,16 +1018,19 @@ export class App {
       action: () => this.runCommand(id, "ui"),
     });
     return [
-      item("New Tab", "new-tab", `${mod}T`),
-      item("Open File…", "open", `${mod}O`),
-      item("Save", "save", `${mod}S`, !tab),
-      item("Save As…", "save-as", `${mod}⇧S`, !tab),
+      item("New Tab", "new-tab", keys("T")),
+      item("Open File…", "open", keys("O")),
+      item("Open Folder…", "open-folder", keys("Shift+F")),
+      item("Go to File…", "quick-open", keys("P")),
+      item("Save", "save", keys("S"), !tab),
+      item("Save As…", "save-as", keys("Shift+S"), !tab),
       "separator",
-      item("New Window", "new-window", `${mod}⇧N`),
+      item("New Window", "new-window", keys("Shift+N")),
       item("Move Tab to New Window", "move-tab", undefined, !tab),
       "separator",
-      item("Find", "find", `${mod}F`, !tab),
-      item("Toggle Outline", "toggle-outline", `${mod}⇧O`),
+      item("Command Palette…", "command-palette", keys("Shift+P")),
+      item("Find", "find", keys("F"), !tab),
+      item("Toggle Sidebar", "toggle-sidebar", keys("\\")),
       item("Reload from Disk", "reload", undefined, !tab?.path),
       item("Reveal in Folder", "reveal", undefined, !tab?.path),
       "separator",
@@ -939,6 +1104,11 @@ export class App {
     }
     $("#welcome-open").addEventListener("click", () => void this.openFileDialog());
     $("#welcome-new").addEventListener("click", () => this.newTab());
+    $("#welcome-folder").addEventListener("click", () => void this.openFolderDialog());
+    for (const b of this.tocEl.querySelectorAll<HTMLElement>(".sidebar-tabs button"))
+      b.addEventListener("click", () => this.showPanel(b.dataset.panel as "files" | "outline", false));
+    window.addEventListener("focus", () => void this.refreshFolder());
+    setInterval(() => void this.refreshFolder(), 10_000);
     for (const el of document.querySelectorAll(".kbd-mod")) el.textContent = isMac ? "⌘" : "Ctrl";
 
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
@@ -1075,6 +1245,10 @@ export class App {
       e: "cycle-mode",
       f: "find",
       ",": "settings",
+      p: "quick-open",
+      "shift+p": "command-palette",
+      "shift+f": "open-folder",
+      "\\": "toggle-sidebar",
       pagedown: "next-tab",
       pageup: "prev-tab",
       "=": "zoom-in",
@@ -1144,10 +1318,13 @@ export class App {
       else if (p.type === "leave") overlay.hidden = true;
       else if (p.type === "drop") {
         overlay.hidden = true;
-        const files = p.paths.filter(isMarkdownPath);
-        if (!files.length && p.paths.length) toast("Only Markdown and text files can be opened.");
         void (async () => {
-          for (const f of files) await this.openPath(f);
+          for (const path of p.paths) {
+            if (isMarkdownPath(path)) await this.openPath(path);
+            else if (!(await this.openFolder(path, true)))
+              toast(`${basename(path)} isn't a Markdown file or a folder.`);
+            else this.showPanel("files", false);
+          }
         })();
       }
     });

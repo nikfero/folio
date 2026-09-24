@@ -5,7 +5,9 @@ import type { Mode } from "./app";
 export interface Settings {
   theme: "system" | "light" | "dark";
   defaultMode: Mode;
+  /** Whether the sidebar is visible. */
   toc: boolean;
+  sidebarPanel: "files" | "outline";
   split: number;
   zoom: number;
   restoreSession: boolean;
@@ -23,6 +25,7 @@ const defaults: Settings = {
   theme: "system",
   defaultMode: "read",
   toc: true,
+  sidebarPanel: "outline",
   split: 0.5,
   zoom: 1,
   restoreSession: true,
@@ -131,6 +134,7 @@ export interface SessionTab {
 export interface Session {
   tabs: SessionTab[];
   active: number;
+  folder?: string | null;
 }
 
 export function session(): Session {

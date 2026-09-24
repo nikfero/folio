@@ -25,8 +25,12 @@
 
     <main id="workspace" data-mode="none">
       <aside id="toc">
-        <div class="toc-title">Outline</div>
-        <nav id="toc-list"></nav>
+        <div class="sidebar-tabs" role="tablist">
+          <button data-panel="files" role="tab">Files</button>
+          <button data-panel="outline" role="tab">Outline</button>
+        </div>
+        <div id="files-panel" class="sidebar-panel"></div>
+        <nav id="toc-list" class="sidebar-panel"></nav>
       </aside>
       <section id="editor-pane" aria-label="Editor"></section>
       <div id="divider" role="separator" aria-orientation="vertical" title="Drag to resize, double-click to reset"></div>
@@ -43,6 +47,7 @@
           </div>
           <div class="welcome-actions">
             <button id="welcome-open" class="btn primary">Open File…</button>
+            <button id="welcome-folder" class="btn">Open Folder…</button>
             <button id="welcome-new" class="btn">New File</button>
           </div>
           <div id="recent" hidden>
@@ -51,11 +56,13 @@
           </div>
           <dl class="welcome-keys">
             <dt><kbd class="kbd-mod">Ctrl</kbd> <kbd>O</kbd></dt><dd>Open</dd>
+            <dt><kbd class="kbd-mod">Ctrl</kbd> <kbd>P</kbd></dt><dd>Go to file</dd>
+            <dt><kbd class="kbd-mod">Ctrl</kbd> <kbd>Shift</kbd> <kbd>P</kbd></dt><dd>All commands</dd>
             <dt><kbd class="kbd-mod">Ctrl</kbd> <kbd>E</kbd></dt><dd>Read / Split / Edit</dd>
             <dt><kbd class="kbd-mod">Ctrl</kbd> <kbd>F</kbd></dt><dd>Find</dd>
             <dt><kbd class="kbd-mod">Ctrl</kbd> + click</dt><dd>Jump from preview to source</dd>
           </dl>
-          <p class="welcome-hint">…or drop Markdown files anywhere in this window.</p>
+          <p class="welcome-hint">…or drop Markdown files or a folder anywhere in this window.</p>
         </div>
       </section>
     </main>

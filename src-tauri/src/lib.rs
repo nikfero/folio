@@ -9,12 +9,14 @@ use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, Wry, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
-/// A request to open a document in a window. `content` carries unsaved text
-/// when a dirty tab is moved to another window.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// A request to open a document (or a folder) in a window. `content` carries
+/// unsaved text when a dirty tab is moved to another window.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct OpenRequest {
     path: Option<String>,
     content: Option<String>,
+    #[serde(default)]
+    folder: Option<String>,
 }
 
 /// Documents waiting for a window whose frontend has not finished loading yet.
@@ -80,6 +82,73 @@ fn write_text(path: String, text: String, bom: bool) -> Result<Option<u64>, Stri
     bytes.extend_from_slice(text.as_bytes());
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
     Ok(mtime_of(Path::new(&path)))
+}
+
+const MARKDOWN_EXTS: &[&str] = &["md", "markdown", "mdown", "mkd", "mkdn", "mdx"];
+/// Directories that never contain documents worth browsing.
+const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "vendor", "__pycache__", "venv"];
+const MAX_FILES: usize = 10_000;
+
+#[derive(Serialize)]
+struct FolderEntry {
+    path: String,
+    /// Path relative to the folder, always with `/` separators.
+    rel: String,
+}
+
+#[derive(Serialize)]
+struct FolderListing {
+    files: Vec<FolderEntry>,
+    truncated: bool,
+}
+
+fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| MARKDOWN_EXTS.contains(&e.to_ascii_lowercase().as_str()))
+}
+
+fn walk(dir: &Path, root: &Path, depth: usize, out: &mut Vec<FolderEntry>) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name().to_ascii_lowercase());
+    for entry in entries {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') {
+            continue;
+        }
+        // file_type() doesn't follow symlinks, so linked directories (and loops) are skipped.
+        let Ok(kind) = entry.file_type() else { continue };
+        let path = entry.path();
+        if kind.is_dir() {
+            if depth < 16 && !SKIP_DIRS.contains(&name.as_ref()) && walk(&path, root, depth + 1, out) {
+                return true;
+            }
+        } else if kind.is_file() && is_markdown(&path) {
+            if out.len() >= MAX_FILES {
+                return true;
+            }
+            let rel = path.strip_prefix(root).unwrap_or(&path);
+            out.push(FolderEntry {
+                path: path.to_string_lossy().into_owned(),
+                rel: rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"),
+            });
+        }
+    }
+    false
+}
+
+/// Lists the Markdown files under `root`, skipping hidden and build directories.
+#[tauri::command]
+fn list_folder(root: String) -> Result<FolderListing, String> {
+    let root = PathBuf::from(root);
+    if !root.is_dir() {
+        return Err(format!("{} is not a folder", root.display()));
+    }
+    let mut files = Vec::new();
+    let truncated = walk(&root, &root, 0, &mut files);
+    Ok(FolderListing { files, truncated })
 }
 
 /// Modification time in ms, or None if the file no longer exists.
@@ -205,6 +274,9 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&item("new-window", "New Window", Some("CmdOrCtrl+Shift+N"))?)
         .separator()
         .item(&item("open", "Open…", Some("CmdOrCtrl+O"))?)
+        .item(&item("open-folder", "Open Folder…", Some("CmdOrCtrl+Shift+F"))?)
+        .item(&item("quick-open", "Quick Open…", Some("CmdOrCtrl+P"))?)
+        .item(&item("close-folder", "Close Folder", None)?)
         .separator()
         .item(&item("save", "Save", Some("CmdOrCtrl+S"))?)
         .item(&item("save-as", "Save As…", Some("CmdOrCtrl+Shift+S"))?)
@@ -225,7 +297,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&item("mode-edit", "Edit", None)?)
         .item(&item("cycle-mode", "Cycle View Mode", Some("CmdOrCtrl+E"))?)
         .separator()
-        .item(&item("toggle-outline", "Toggle Outline", Some("CmdOrCtrl+Shift+O"))?)
+        .item(&item("command-palette", "Command Palette…", Some("CmdOrCtrl+Shift+P"))?)
+        .separator()
+        .item(&item("toggle-sidebar", "Toggle Sidebar", Some("CmdOrCtrl+\\"))?)
+        .item(&item("show-files", "Show Files", None)?)
+        .item(&item("toggle-outline", "Show Outline", Some("CmdOrCtrl+Shift+O"))?)
         .item(&item("find", "Find", Some("CmdOrCtrl+F"))?)
         .item(&item("cycle-theme", "Change Theme", None)?)
         .separator()
@@ -294,10 +370,16 @@ fn docs_from_args(args: &[String], cwd: &Path) -> Vec<OpenRequest> {
                 cwd.join(p)
             }
         })
-        .filter(|p| p.is_file())
-        .map(|p| OpenRequest {
-            path: Some(std::path::absolute(&p).unwrap_or(p).to_string_lossy().into_owned()),
-            content: None,
+        .filter_map(|p| {
+            let abs = std::path::absolute(&p).unwrap_or(p).to_string_lossy().into_owned();
+            let abs_path = Path::new(&abs);
+            if abs_path.is_file() {
+                Some(OpenRequest { path: Some(abs), ..Default::default() })
+            } else if abs_path.is_dir() {
+                Some(OpenRequest { folder: Some(abs), ..Default::default() })
+            } else {
+                None
+            }
         })
         .collect()
 }
@@ -360,6 +442,7 @@ pub fn run() {
             write_text,
             file_mtime,
             frontend_ready,
+            list_folder,
             new_window,
             menu_visible,
             set_menu_visible
@@ -373,9 +456,13 @@ pub fn run() {
                 let docs: Vec<OpenRequest> = urls
                     .into_iter()
                     .filter_map(|u| u.to_file_path().ok())
-                    .map(|p| OpenRequest {
-                        path: Some(p.to_string_lossy().into_owned()),
-                        content: None,
+                    .map(|p| {
+                        let path = p.to_string_lossy().into_owned();
+                        if p.is_dir() {
+                            OpenRequest { folder: Some(path), ..Default::default() }
+                        } else {
+                            OpenRequest { path: Some(path), ..Default::default() }
+                        }
                     })
                     .collect();
                 let label = target_window(app)

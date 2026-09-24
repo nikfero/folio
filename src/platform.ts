@@ -9,6 +9,19 @@ export interface TextFile {
 export interface OpenRequest {
   path: string | null;
   content: string | null;
+  /** A folder to show in the sidebar instead of a document. */
+  folder?: string | null;
+}
+
+export interface FolderEntry {
+  path: string;
+  /** Relative to the folder, with `/` separators. */
+  rel: string;
+}
+
+export interface FolderListing {
+  files: FolderEntry[];
+  truncated: boolean;
 }
 
 export const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -22,6 +35,8 @@ export const writeText = (path: string, text: string, bom: boolean) =>
 export const fileMtime = (path: string) => invoke<number | null>("file_mtime", { path });
 
 export const frontendReady = () => invoke<OpenRequest[]>("frontend_ready");
+
+export const listFolder = (root: string) => invoke<FolderListing>("list_folder", { root });
 
 export const newWindow = (docs: OpenRequest[] = []) => invoke<void>("new_window", { docs });
 

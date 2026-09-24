@@ -6,6 +6,8 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 
 - **Read / Split / Edit** modes (<kbd>Ctrl</kbd>+<kbd>E</kbd> cycles) with synced scrolling in Split
 - **Tabs** you can reorder by dragging, plus **Move Tab to New Window** and **New Window**
+- **Folders**: open a folder (or pass one on the command line, or drop it on the window) to browse its Markdown files in the sidebar; `.git`, `node_modules` and build folders are skipped
+- **Go to File** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>P</kbd>) with fuzzy search, and a **Command Palette** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>, or type `>` in Go to File)
 - **Change detection**: when another program (git, an AI agent, another editor) changes an open file, Folio shows a banner with **Reload** / **Ignore**. Automatic reloading can be turned on for all files in Settings, or per file with the **Auto-reload** toggle in the status bar; it never discards unsaved edits
 - GitHub-flavored Markdown: tables, task lists, footnotes, autolinks, syntax-highlighted code with a copy button
 - **Clickable checkboxes** that update (and save) the source file
@@ -32,7 +34,11 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | same |
 | Go to tab 1–9 | Ctrl+1…9 | ⌘1…9 |
 | Cycle Read / Split / Edit | Ctrl+E | ⌘E |
-| Toggle outline | Ctrl+Shift+O | ⌘⇧O |
+| Go to file | Ctrl+P | ⌘P |
+| Command palette | Ctrl+Shift+P | ⌘⇧P |
+| Open folder | Ctrl+Shift+F | ⌘⇧F |
+| Toggle sidebar | Ctrl+\ | ⌘\ |
+| Show outline | Ctrl+Shift+O | ⌘⇧O |
 | Find | Ctrl+F | ⌘F |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | ⌘= / ⌘- / ⌘0 |
 | Settings | Ctrl+, | ⌘, |

@@ -65,6 +65,9 @@ ${Array.from({ length: 12 }, (_, i) => `\n## Section ${i + 1}\n\nLorem ipsum dol
 
 const files = new Map<string, { text: string; mtime: number }>([
   ["C:\\docs\\README.md", { text: SAMPLE, mtime: 1 }],
+  ["C:\\docs\\guides\\setup.md", { text: "# Setup\n\nInstall Folio and open a folder.\n", mtime: 1 }],
+  ["C:\\docs\\guides\\advanced\\tips.md", { text: "# Tips\n\nPress **Ctrl+P** to jump to any file.\n", mtime: 1 }],
+  ["C:\\docs\\notes\\ideas.md", { text: "# Ideas\n\n- [ ] Folder sidebar\n", mtime: 1 }],
   ["C:\\docs\\guide.md", { text: "# Guide\n\n## Usage\n\nOpen a file with **Ctrl+O**.\n\n[Back to README](README.md)\n", mtime: 1 }],
 ]);
 
@@ -90,7 +93,15 @@ export function installMock(): void {
         case "frontend_ready":
           return [{ path: "C:\\docs\\README.md", content: null }];
         case "plugin:dialog|open":
-          return ["C:\\docs\\guide.md"];
+          return (args as { options?: { directory?: boolean } }).options?.directory ? "C:\\docs" : ["C:\\docs\\guide.md"];
+        case "list_folder": {
+          const root = String(args.root).replace(/[\\/]+$/, "") + "\\";
+          const entries = [...files.keys()]
+            .filter((p) => p.toLowerCase().startsWith(root.toLowerCase()))
+            .sort()
+            .map((p) => ({ path: p, rel: p.slice(root.length).replace(/\\/g, "/") }));
+          return { files: entries, truncated: false };
+        }
         case "plugin:dialog|save":
           return "C:\\docs\\new-file.md";
         case "plugin:opener|open_url":

@@ -338,7 +338,7 @@ kbd {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 body:has(#workspace[data-mode="none"]) #modes,
-body:has(#workspace[data-mode="none"]) #btn-toc {
+body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   visibility: hidden;
 }
 
@@ -376,13 +376,105 @@ body:has(#workspace[data-mode="none"]) #btn-toc {
   border-right: 1px solid var(--border);
   user-select: none;
 }
-.toc-title {
-  padding: 0 8px 8px;
-  font-size: 11px;
+.sidebar-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 0 10px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--bg-hover);
+}
+.sidebar-tabs button {
+  flex: 1;
+  padding: 3px 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.sidebar-tabs button:hover {
+  color: var(--fg);
+}
+.sidebar-tabs button[aria-selected="true"] {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+#toc[data-panel="files"] #toc-list,
+#toc:not([data-panel="files"]) #files-panel {
+  display: none;
+}
+
+/* File tree */
+.tree-folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 6px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-folder svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
   color: var(--fg-faint);
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px calc(8px + var(--depth, 0) * 14px);
+  border-radius: 5px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tree-row.file {
+  padding-left: calc(26px + var(--depth, 0) * 14px);
+}
+.tree-row:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.tree-row.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.tree-row.dir {
+  color: var(--fg);
+}
+.tree-caret {
+  display: grid;
+  flex: none;
+  width: 14px;
+  color: var(--fg-faint);
+  transform: rotate(-90deg);
+  transition: transform 0.12s;
+}
+.tree-caret svg {
+  width: 12px;
+  height: 12px;
+}
+.tree-row.open .tree-caret {
+  transform: none;
+}
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-empty,
+.tree-note {
+  padding: 0 8px;
+  color: var(--fg-faint);
+}
+.tree-empty p {
+  margin: 0 0 8px;
 }
 .toc-item {
   display: block;
@@ -449,7 +541,8 @@ body:has(#workspace[data-mode="none"]) #btn-toc {
 #workspace[data-mode="split"] #preview-pane {
   flex: calc(1 - var(--split)) 1 0;
 }
-#workspace[data-mode="none"] > :not(#welcome) {
+#workspace[data-mode="none"] > :not(#welcome, #toc),
+#workspace[data-mode="none"]:not(.has-folder) > #toc {
   display: none;
 }
 
@@ -888,4 +981,84 @@ body:has(#workspace[data-mode="none"]) #btn-toc {
   margin: 12px 0 0 !important;
   font-size: 11.5px;
   color: var(--fg-faint) !important;
+}
+
+/* ---------------------------------------------------------------- palette */
+
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 64px;
+  background: rgba(0, 0, 0, 0.12);
+}
+.palette {
+  display: flex;
+  flex-direction: column;
+  width: min(600px, calc(100vw - 32px));
+  max-height: min(460px, calc(100vh - 96px));
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.palette input {
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font: 14px var(--font-ui);
+}
+.palette-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+.palette-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.palette-item.active {
+  background: var(--accent-soft);
+}
+.palette-label {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.palette-label b {
+  color: var(--accent);
+  font-weight: 600;
+}
+.palette-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+.palette-item kbd {
+  margin-left: auto;
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--fg-faint);
+  font-family: var(--font-ui);
+}
+.palette-empty {
+  padding: 14px;
+  color: var(--fg-faint);
+  text-align: center;
 }
