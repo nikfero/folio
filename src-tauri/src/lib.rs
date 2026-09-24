@@ -303,7 +303,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&item("show-files", "Show Files", None)?)
         .item(&item("toggle-outline", "Show Outline", Some("CmdOrCtrl+Shift+O"))?)
         .item(&item("find", "Find", Some("CmdOrCtrl+F"))?)
-        .item(&item("cycle-theme", "Change Theme", None)?)
+        .item(&item("toggle-theme", "Toggle Light / Dark Theme", None)?)
         .separator()
         .item(&item("zoom-in", "Zoom In", Some("CmdOrCtrl+="))?)
         .item(&item("zoom-out", "Zoom Out", Some("CmdOrCtrl+-"))?)

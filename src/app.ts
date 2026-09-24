@@ -140,7 +140,7 @@ export class App {
     "quick-open": () => this.quickOpen(),
     "command-palette": () => this.commandPalette(),
     find: () => this.openFind(),
-    "cycle-theme": () => this.cycleTheme(),
+    "toggle-theme": () => this.toggleTheme(),
     "zoom-in": () => this.zoom(0.1),
     "zoom-out": () => this.zoom(-0.1),
     "zoom-reset": () => this.zoom(null),
@@ -510,7 +510,7 @@ export class App {
       ["find", "Find", keys("F")],
       ["next-tab", "Next Tab", "Ctrl+Tab"],
       ["prev-tab", "Previous Tab", "Ctrl+Shift+Tab"],
-      ["cycle-theme", "Change Theme"],
+      ["toggle-theme", "Toggle Light / Dark Theme"],
       ["zoom-in", "Zoom In", keys("=")],
       ["zoom-out", "Zoom Out", keys("-")],
       ["zoom-reset", "Actual Size", keys("0")],
@@ -973,16 +973,18 @@ export class App {
   }
 
   private applyTheme(): void {
-    const pref = settings.get("theme");
-    document.documentElement.dataset.theme = settings.resolvedTheme();
+    const theme = settings.resolvedTheme();
+    document.documentElement.dataset.theme = theme;
+    // The button shows what clicking it does, not the current theme.
     const btn = $("#btn-theme");
-    btn.innerHTML = pref === "light" ? icons.sun : pref === "dark" ? icons.moon : icons.auto;
-    btn.title = `Theme: ${pref[0].toUpperCase()}${pref.slice(1)}`;
+    btn.innerHTML = theme === "dark" ? icons.sun : icons.moon;
+    btn.title = theme === "dark" ? "Switch to light theme" : "Switch to dark theme";
+    btn.setAttribute("aria-label", btn.title);
   }
 
-  private cycleTheme(): void {
-    const order = ["system", "light", "dark"] as const;
-    settings.set("theme", order[(order.indexOf(settings.get("theme")) + 1) % order.length]);
+  /** Flips between light and dark ("Match system" stays available in Settings). */
+  private toggleTheme(): void {
+    settings.set("theme", settings.resolvedTheme() === "dark" ? "light" : "dark");
     this.applyTheme();
     this.renderNow();
   }
@@ -1254,7 +1256,7 @@ export class App {
     $("#btn-new-tab").addEventListener("click", () => this.runCommand("new-tab", "ui"));
     $("#st-reload").addEventListener("click", () => this.runCommand("toggle-auto-reload", "ui"));
     $("#btn-toc").addEventListener("click", () => this.runCommand("toggle-outline", "ui"));
-    $("#btn-theme").addEventListener("click", () => this.runCommand("cycle-theme", "ui"));
+    $("#btn-theme").addEventListener("click", () => this.runCommand("toggle-theme", "ui"));
     $("#btn-menu").addEventListener("click", (e) => {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       showMenu(r.right - 220, r.bottom + 4, this.appMenuEntries());
