@@ -330,6 +330,13 @@ fn file_mtime(path: String) -> Option<u64> {
     mtime_of(Path::new(&path))
 }
 
+/// Opens the system print dialog for the calling window (WKWebView on macOS
+/// doesn't support `window.print()`).
+#[tauri::command]
+fn print_window(window: WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|e| e.to_string())
+}
+
 /// Called by each window once its listeners are registered; returns the
 /// documents that were queued for it before it was ready.
 #[tauri::command]
@@ -455,6 +462,9 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&item("save-as", "Save As…", Some("CmdOrCtrl+Shift+S"))?)
         .item(&item("reload", "Reload from Disk", None)?)
         .item(&item("reveal", "Reveal in Folder", None)?)
+        .separator()
+        .item(&item("export-html", "Export as HTML…", None)?)
+        .item(&item("print", "Print / Save as PDF…", None)?)
         .separator()
         .item(&item("close-tab", "Close Tab", Some("CmdOrCtrl+W"))?);
     #[cfg(not(target_os = "macos"))]
@@ -617,6 +627,7 @@ pub fn run() {
             write_text,
             file_mtime,
             frontend_ready,
+            print_window,
             list_folder,
             search_folder,
             create_file,

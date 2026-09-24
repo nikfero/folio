@@ -19,6 +19,7 @@ import * as settings from "./settings";
 import { openSettings } from "./settings-panel";
 import { FileTree } from "./filetree";
 import { SearchPanel } from "./search";
+import { buildHtml } from "./export";
 import { openPalette, type PaletteItem, type PaletteSource } from "./palette";
 import {
   MARKDOWN_EXTS,
@@ -28,6 +29,7 @@ import {
   dirname,
   isWindows,
   joinPath,
+  printWindow,
   renamePath,
   searchFolder,
   trashPath,
@@ -165,6 +167,8 @@ export class App {
     "prev-tab": () => this.cycleTab(-1),
     "move-tab": () => this.active && this.moveToNewWindow(this.active),
     "toggle-auto-reload": () => this.toggleAutoReload(),
+    "export-html": () => this.exportHtml(),
+    print: () => this.print(),
     "format-bold": () => this.format((v) => toggleInline(v, "**")),
     "format-italic": () => this.format((v) => toggleInline(v, "*")),
     "format-code": () => this.format((v) => toggleInline(v, "`")),
@@ -665,6 +669,8 @@ export class App {
       ["close-tab", "Close Tab", keys("W")],
       ["reload", "Reload from Disk"],
       ["reveal", "Reveal in Folder"],
+      ["export-html", "Export as HTML…"],
+      ["print", "Print / Save as PDF…"],
       ["move-tab", "Move Tab to New Window"],
       ["toggle-auto-reload", "Toggle Auto-reload for This File"],
       ["format-bold", "Format: Bold", keys("B")],
@@ -1234,6 +1240,8 @@ export class App {
       "separator",
       item("New Window", "new-window", keys("Shift+N")),
       item("Move Tab to New Window", "move-tab", undefined, !tab),
+      item("Export as HTML…", "export-html", undefined, !tab),
+      item("Print / Save as PDF…", "print", undefined, !tab),
       "separator",
       item("Command Palette…", "command-palette", keys("Shift+P")),
       item("Find", "find", keys("F"), !tab),
@@ -1277,6 +1285,54 @@ export class App {
         action: () => tab.path && void revealItemInDir(tab.path).catch((e) => toast(String(e), "error")),
       },
     ];
+  }
+
+  // ---------------------------------------------------------------- export
+
+  private async exportHtml(): Promise<void> {
+    const tab = this.active;
+    if (!tab) return;
+    const stem = this.tabName(tab).replace(/\.[^.]+$/, "");
+    const path = await saveDialog({
+      defaultPath: tab.path ? joinPath(dirname(tab.path), `${stem}.html`) : `${stem}.html`,
+      filters: [{ name: "HTML", extensions: ["html", "htm"] }],
+    });
+    if (!path) return;
+    try {
+      this.renderNow();
+      await writeText(path, await buildHtml(this.preview.body, stem), false);
+      this.flash(`Exported ${basename(path)}`);
+    } catch (e) {
+      toast(`Couldn't export: ${e}`, "error");
+    }
+  }
+
+  /** Prints the rendered document (the print dialog can also save it as a PDF), always in the light theme. */
+  private async print(): Promise<void> {
+    if (!this.active) return;
+    const root = document.documentElement;
+    const theme = root.dataset.theme;
+    if (theme === "dark") {
+      root.dataset.theme = "light";
+      this.renderNow(); // re-render diagrams in light colours
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    try {
+      await printWindow();
+    } catch (e) {
+      toast(`Couldn't print: ${e}`, "error");
+    } finally {
+      // window.print() returns once the dialog closes; the macOS dialog captures the page when it opens.
+      setTimeout(
+        () => {
+          if (theme === "dark") {
+            root.dataset.theme = "dark";
+            this.renderNow();
+          }
+        },
+        isMac ? 1500 : 0,
+      );
+    }
   }
 
   // ------------------------------------------------------------ formatting

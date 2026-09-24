@@ -1374,3 +1374,45 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   color: var(--fg-faint);
   font-size: 10.5px;
 }
+
+/* ------------------------------------------------------------------ print */
+
+@media print {
+  html,
+  body {
+    height: auto;
+    overflow: visible;
+    background: #fff;
+  }
+  #topbar,
+  #banner,
+  #toc,
+  #editor-pane,
+  #divider,
+  #welcome,
+  #statusbar,
+  .findbar,
+  #toasts,
+  #drop-overlay,
+  .menu,
+  .code-copy {
+    display: none !important;
+  }
+  #workspace {
+    display: block !important;
+  }
+  #preview-pane {
+    display: block !important;
+    overflow: visible !important;
+  }
+  .markdown-body {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  .markdown-body :is(pre, table, img, .mermaid, blockquote) {
+    break-inside: avoid;
+  }
+  .markdown-body :is(h1, h2, h3, h4) {
+    break-after: avoid;
+  }
+}

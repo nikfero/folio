@@ -137,3 +137,6 @@ export async function saveImage(dir: string, fileName: string, data: ArrayBuffer
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return invoke<string>("save_image", { dir, fileName, data: btoa(binary) });
 }
+
+/** Opens the system print dialog (the web API is unavailable in macOS's web view). */
+export const printWindow = () => (isMac ? invoke<void>("print_window") : Promise.resolve(window.print()));
