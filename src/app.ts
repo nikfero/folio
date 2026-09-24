@@ -115,6 +115,7 @@ export class App {
     "next-tab": () => this.cycleTab(1),
     "prev-tab": () => this.cycleTab(-1),
     "move-tab": () => this.active && this.moveToNewWindow(this.active),
+    "toggle-auto-reload": () => this.toggleAutoReload(),
   };
   private lastCommand = { id: "", source: "", time: 0 };
 
@@ -163,6 +164,22 @@ export class App {
 
   private isDirty(tab: Tab): boolean {
     return !tab.state.doc.eq(tab.savedDoc);
+  }
+
+  /** Whether this tab reloads silently when its file changes: the file's own override, else the global setting. */
+  private autoReloadFor(tab: Tab): boolean {
+    if (!tab.path) return false;
+    return settings.reloadOverride(pathKey(tab.path)) ?? settings.get("autoReload");
+  }
+
+  private toggleAutoReload(tab: Tab | null = this.active): void {
+    if (!tab?.path) return;
+    const next = !this.autoReloadFor(tab);
+    // Store an override only when it differs from the global default.
+    settings.setReloadOverride(pathKey(tab.path), next === settings.get("autoReload") ? undefined : next);
+    this.flash(`Auto-reload ${next ? "on" : "off"} for ${this.tabName(tab)}`);
+    if (next && tab.external === "changed" && !this.isDirty(tab)) void this.reloadFromDisk(tab);
+    else this.refreshUi();
   }
 
   private tabName(tab: Tab): string {
@@ -431,7 +448,7 @@ export class App {
         } else if (mtime !== tab.mtime) {
           // By default the user decides when to reload (banner); auto-reload is opt-in
           // and never discards unsaved edits.
-          if (!this.isDirty(tab) && settings.get("autoReload")) {
+          if (!this.isDirty(tab) && this.autoReloadFor(tab)) {
             await this.reloadFromDisk(tab);
             if (tab === this.active) this.flash("Reloaded from disk");
           } else if (tab.external !== "changed") {
@@ -710,7 +727,7 @@ export class App {
       tab.external === "changed"
         ? this.isDirty(tab)
           ? `<span>This file was changed by another program. Reloading will discard your unsaved edits.</span><button class="btn small primary" data-act="reload">Reload</button><button class="btn small" data-act="keep">Keep my version</button>`
-          : `<span>This file was changed by another program.</span><button class="btn small primary" data-act="reload">Reload</button><button class="btn small" data-act="keep">Ignore</button>`
+          : `<span>This file was changed by another program.</span><button class="btn small primary" data-act="reload">Reload</button><button class="btn small" data-act="always">Always reload this file</button><button class="btn small" data-act="keep">Ignore</button>`
         : `<span>This file was deleted or moved.</span><button class="btn small primary" data-act="save">Save to recreate</button><button class="btn small" data-act="close">Close tab</button>`;
   }
 
@@ -742,8 +759,18 @@ export class App {
     const line = state.doc.lineAt(head);
     $("#st-pos").textContent = tab.mode === "read" ? "" : `Ln ${line.number}, Col ${head - line.from + 1}`;
     const words = this.wordCount;
-    $("#st-words").textContent = `${words.toLocaleString()} words · ${Math.max(1, Math.round(words / 230))} min read`;
+    $("#st-words").textContent = `${words.toLocaleString()} ${words === 1 ? "word" : "words"} · ${Math.max(1, Math.round(words / 230))} min read`;
     $("#st-eol").textContent = tab.eol === "\r\n" ? "CRLF" : "LF";
+
+    const reload = $("#st-reload");
+    reload.hidden = !tab.path;
+    const on = this.autoReloadFor(tab);
+    reload.classList.toggle("on", on);
+    reload.setAttribute("aria-pressed", String(on));
+    reload.innerHTML = `${icons.reload}<span>Auto-reload</span>`;
+    reload.title = on
+      ? "This file reloads automatically when another program changes it. Click to ask first instead."
+      : "Folio asks before reloading this file when another program changes it. Click to reload automatically.";
   }
 
   private flashTimer = 0;
@@ -797,6 +824,7 @@ export class App {
     this.tocEl.hidden = !settings.get("toc");
     this.workspace.style.setProperty("--split", String(settings.get("split")));
     this.scrollMap.invalidate();
+    this.updateStatus(); // the auto-reload indicator follows the global default
   }
 
   private showSettings(): void {
@@ -860,6 +888,11 @@ export class App {
       },
       "separator",
       { label: "Move to New Window", action: () => void this.moveToNewWindow(tab) },
+      {
+        label: `${this.autoReloadFor(tab) ? "✓ " : ""}Auto-reload This File`,
+        disabled: !tab.path,
+        action: () => this.toggleAutoReload(tab),
+      },
       "separator",
       {
         label: "Copy Path",
@@ -893,6 +926,7 @@ export class App {
     $("#btn-new-tab").title = `New tab (${mod}T)`;
     $("#btn-toc").title = `Outline (${mod}⇧O)`;
     $("#btn-new-tab").addEventListener("click", () => this.runCommand("new-tab", "ui"));
+    $("#st-reload").addEventListener("click", () => this.runCommand("toggle-auto-reload", "ui"));
     $("#btn-toc").addEventListener("click", () => this.runCommand("toggle-outline", "ui"));
     $("#btn-theme").addEventListener("click", () => this.runCommand("cycle-theme", "ui"));
     $("#btn-menu").addEventListener("click", (e) => {
@@ -920,6 +954,7 @@ export class App {
       if (!act || !tab) return;
       if (act === "reload") void this.reloadFromDisk(tab);
       else if (act === "save") void this.save(tab);
+      else if (act === "always") this.toggleAutoReload(tab);
       else if (act === "close") void this.closeTab(tab);
       else if (act === "keep" && tab.path) {
         // Treat the current disk version as seen; the next save overwrites it.

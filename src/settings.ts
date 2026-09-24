@@ -101,6 +101,24 @@ export function removeRecent(path: string): void {
   );
 }
 
+// ---- per-file auto-reload overrides (keyed by normalized path)
+
+function reloadOverrides(): Record<string, boolean> {
+  return readJson<Record<string, boolean>>("reloadOverrides", {});
+}
+
+export function reloadOverride(key: string): boolean | undefined {
+  return reloadOverrides()[key];
+}
+
+/** Sets a file's auto-reload override; `undefined` makes it follow the global setting again. */
+export function setReloadOverride(key: string, value: boolean | undefined): void {
+  const all = reloadOverrides();
+  if (value === undefined) delete all[key];
+  else all[key] = value;
+  writeJson("reloadOverrides", all);
+}
+
 // ---- session (the main window's open tabs)
 
 export interface SessionTab {

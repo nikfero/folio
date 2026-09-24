@@ -6,7 +6,7 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 
 - **Read / Split / Edit** modes (<kbd>Ctrl</kbd>+<kbd>E</kbd> cycles) with synced scrolling in Split
 - **Tabs** you can reorder by dragging, plus **Move Tab to New Window** and **New Window**
-- **Change detection**: when another program (git, an AI agent, another editor) changes an open file, Folio shows a banner with **Reload** / **Ignore**. Automatic reloading can be turned on in Settings; it never discards unsaved edits
+- **Change detection**: when another program (git, an AI agent, another editor) changes an open file, Folio shows a banner with **Reload** / **Ignore**. Automatic reloading can be turned on for all files in Settings, or per file with the **Auto-reload** toggle in the status bar; it never discards unsaved edits
 - GitHub-flavored Markdown: tables, task lists, footnotes, autolinks, syntax-highlighted code with a copy button
 - **Clickable checkboxes** that update (and save) the source file
 - **Jump to source**: <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+click in the preview (or double-click in Split) moves the editor to that line
