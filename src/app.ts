@@ -27,6 +27,7 @@ import {
   isMac,
   isMarkdownPath,
   listFolder,
+  ltr,
   newWindow,
   pathKey,
   readClipboard,
@@ -100,8 +101,9 @@ export class App {
   private tocList = $("#toc-list");
   private fileTree = new FileTree($("#files-panel"), {
     open: (path) => void this.openPath(path),
-    openFolder: () => void this.openFolderDialog(),
+    openFolder: (path) => void (path ? this.openFolder(path) : this.openFolderDialog()),
     closeFolder: () => this.setFolder(null),
+    recentFolders: () => settings.recentFolders(),
   });
   private banner = $("#banner");
   private welcome = $("#welcome");
@@ -411,11 +413,17 @@ export class App {
       this.fileTree.setFolder(path, listing.files, listing.truncated);
       this.fileTree.setActive(this.active?.path ?? null);
       this.workspace.classList.add("has-folder");
+      settings.addRecentFolder(path);
       if (!quiet) this.showPanel("files", false);
       this.scheduleSessionSave();
       return true;
     } catch (e) {
-      if (!quiet) toast(`Couldn't open folder: ${e}`, "error");
+      if (!quiet) {
+        toast(`Couldn't open folder: ${e}`, "error");
+        // A recent folder that no longer exists drops off the list.
+        settings.removeRecentFolder(path);
+        if (!this.fileTree.folder) this.fileTree.setFolder(null, []);
+      }
       return false;
     }
   }
@@ -423,7 +431,6 @@ export class App {
   private setFolder(path: null): void {
     this.fileTree.setFolder(path, []);
     this.workspace.classList.remove("has-folder");
-    if (settings.get("sidebarPanel") === "files") this.showPanel("outline", false);
     this.scheduleSessionSave();
   }
 
@@ -924,7 +931,7 @@ export class App {
       item.className = "recent-item";
       item.innerHTML = `<span class="recent-name"></span><span class="recent-dir"></span>`;
       item.querySelector(".recent-name")!.textContent = basename(path);
-      item.querySelector(".recent-dir")!.textContent = dirname(path);
+      item.querySelector(".recent-dir")!.textContent = ltr(dirname(path));
       item.title = path;
       item.addEventListener("click", () => void this.openPath(path));
       list.appendChild(item);
@@ -935,7 +942,7 @@ export class App {
     const tab = this.active;
     $("#statusbar").hidden = !tab;
     if (!tab) return;
-    $("#st-path").textContent = tab.path ?? this.tabName(tab);
+    $("#st-path").textContent = ltr(tab.path ?? this.tabName(tab));
     $("#st-path").title = tab.path ?? "";
     const state = tab.state;
     const head = state.selection.main.head;

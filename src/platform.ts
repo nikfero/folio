@@ -72,6 +72,13 @@ export function resolvePath(base: string, rel: string): string {
   return normRoot + out.join(sep);
 }
 
+/**
+ * Wraps a path in left-to-right marks. Path labels use `direction: rtl` so a
+ * long path is cut from the left; without the marks, punctuation at the ends
+ * (like the colon in "C:") would be flipped to the wrong side.
+ */
+export const ltr = (text: string) => `\u200e${text}\u200e`;
+
 /** Key used to detect that two paths point to the same file. */
 export function pathKey(p: string): string {
   const k = p.replace(/\\/g, "/");

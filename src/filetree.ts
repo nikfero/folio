@@ -1,7 +1,7 @@
 // The folder view in the sidebar: a collapsible tree of the folder's Markdown files.
 
 import { icons } from "./icons";
-import { basename, pathKey, type FolderEntry } from "./platform";
+import { basename, dirname, isMac, ltr, pathKey, type FolderEntry } from "./platform";
 
 interface DirNode {
   name: string;
@@ -36,10 +36,17 @@ export class FileTree {
 
   constructor(
     private el: HTMLElement,
-    private handlers: { open(path: string): void; openFolder(): void; closeFolder(): void },
+    private handlers: {
+      open(path: string): void;
+      openFolder(path?: string): void;
+      closeFolder(): void;
+      recentFolders(): string[];
+    },
   ) {
     el.addEventListener("click", (e) => {
       const target = e.target as Element;
+      const recent = target.closest<HTMLElement>("[data-recent-folder]");
+      if (recent) return this.handlers.openFolder(recent.dataset.recentFolder);
       if (target.closest("[data-open-folder]")) return this.handlers.openFolder();
       if (target.closest("[data-close-folder]")) return this.handlers.closeFolder();
       const row = target.closest<HTMLElement>(".tree-row");
@@ -93,6 +100,25 @@ export class FileTree {
     return this.files.some((f) => pathKey(f.path) === key);
   }
 
+  private emptyState(): string {
+    const shortcut = isMac ? "⌘⇧F" : "Ctrl+Shift+F";
+    const recent = this.handlers
+      .recentFolders()
+      .slice(0, 5)
+      .map(
+        (p) =>
+          `<button class="tree-recent" data-recent-folder="${escapeAttr(p)}" title="${escapeAttr(p)}">${icons.folder}<span class="tree-recent-name">${escapeText(basename(p))}</span><span class="tree-recent-dir">${escapeText(ltr(dirname(p)))}</span></button>`,
+      )
+      .join("");
+    return `<div class="tree-empty">
+        <div class="tree-empty-icon">${icons.folder}</div>
+        <p class="tree-empty-title">No folder open</p>
+        <p class="tree-empty-text">Open a folder to browse all of its Markdown files here.</p>
+        <button class="tree-open-btn" data-open-folder>${icons.folder}<span>Open Folder…</span></button>
+        <p class="tree-empty-key"><kbd>${shortcut}</kbd><br>or drop a folder onto the window</p>
+      </div>${recent ? `<div class="tree-recents"><div class="tree-recents-title">Recent folders</div>${recent}</div>` : ""}`;
+  }
+
   private expandParents(rel: string): void {
     const parts = rel.split("/");
     for (let i = 1; i < parts.length; i++) this.expanded.add(parts.slice(0, i).join("/"));
@@ -100,7 +126,7 @@ export class FileTree {
 
   private render(): void {
     if (!this.root) {
-      this.el.innerHTML = `<div class="tree-empty"><p>No folder open.</p><button class="btn small" data-open-folder>Open Folder…</button></div>`;
+      this.el.innerHTML = this.emptyState();
       return;
     }
     const head = `<div class="tree-folder" title="${escapeAttr(this.root)}">${icons.folder}<span>${escapeText(basename(this.root))}</span><button class="icon-btn tree-close" data-close-folder title="Close Folder" aria-label="Close Folder">${icons.close}</button></div>`;

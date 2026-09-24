@@ -104,6 +104,23 @@ export function removeRecent(path: string): void {
   );
 }
 
+// ---- recent folders
+
+export function recentFolders(): string[] {
+  return readJson<string[]>("recentFolders", []);
+}
+
+export function addRecentFolder(path: string): void {
+  writeJson("recentFolders", [path, ...recentFolders().filter((p) => p !== path)].slice(0, 8));
+}
+
+export function removeRecentFolder(path: string): void {
+  writeJson(
+    "recentFolders",
+    recentFolders().filter((p) => p !== path),
+  );
+}
+
 // ---- per-file auto-reload overrides (keyed by normalized path)
 
 function reloadOverrides(): Record<string, boolean> {
