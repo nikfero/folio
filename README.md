@@ -2,6 +2,9 @@
 
 A light, fast Markdown viewer and editor for Windows, macOS and Linux, built with [Tauri 2](https://tauri.app).
 
+> [!NOTE]
+> **Vibe-coded with Claude.** Folio was written almost entirely by [Claude](https://claude.ai) (Anthropic's AI) through conversation, for my own use and needs. I'm releasing it in case it's useful to someone else, as is, with no promises of support. Issues and pull requests are welcome, but answers may be slow.
+
 ## Features
 
 - **Four views** (<kbd>Ctrl</kbd>+<kbd>E</kbd> cycles):
@@ -22,6 +25,7 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 - **Editing helpers**: shortcuts for bold, italic, inline code, strikethrough and links; paste a URL over text to link it; paste an image, or drag image files in from the file manager, to put them in `images/` next to the document
 - **Table editing** from the right-click menu: insert, move and delete rows and columns, set column alignment, align the columns, insert a new table
 - **Crash-safe**: unsaved changes are kept on disk as you type, and come back after a crash or power cut
+- **Updates**: checks for a new version once a day (or on request) and installs it after asking; can be turned off in Settings
 - **Export** a standalone HTML file, or **Print / Save as PDF**. Export options: table of contents (top or sidebar), light / dark / follow-the-reader theme, font, text width, metadata, extra CSS; images and math fonts are embedded so the file works offline
 - **Focus mode** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>): only the text in a calm centered column; the current sentence or paragraph stays bright, typewriter scrolling keeps your line mid-screen, and a small bar appears when you move the mouse
 - **Full screen**: <kbd>F11</kbd> (<kbd>⌃</kbd>+<kbd>⌘</kbd>+<kbd>F</kbd> on macOS)
@@ -104,6 +108,7 @@ src/                 frontend (TypeScript, no framework)
   export.ts          standalone HTML export
   export-options.ts  export options dialog
   themes.ts          preview themes (built-in and custom CSS files)
+  updater.ts         update checks and the "update available" card
   scrollsync.ts      editor <-> preview position mapping
   lazy/              KaTeX and Mermaid, loaded on demand
 src-tauri/           Rust backend: file I/O, folder listing and search, file
@@ -116,4 +121,8 @@ themes/              built-in preview themes, a template, and export snippets
 
 GitHub Actions builds installers for Windows (`.msi`, `.exe`), macOS (`.dmg` for Apple Silicon and Intel) and Linux (`.deb`, `.rpm`, `.AppImage`) into a draft release. You can start a release from the GitHub website or by pushing a `v*` tag.
 
-See **[docs/RELEASING.md](docs/RELEASING.md)** for step-by-step instructions, troubleshooting, and notes on unsigned builds.
+See **[docs/RELEASING.md](docs/RELEASING.md)** for step-by-step instructions, troubleshooting and how updates work, and **[docs/SIGNING.md](docs/SIGNING.md)** for code signing on macOS and Windows.
+
+## License
+
+[MIT](LICENSE)
