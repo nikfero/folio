@@ -10,6 +10,7 @@ export interface Settings {
   zoom: number;
   restoreSession: boolean;
   autoSave: boolean;
+  autoReload: boolean;
   menuBar: boolean;
   editorFontSize: number;
   lineNumbers: boolean;
@@ -26,6 +27,7 @@ const defaults: Settings = {
   zoom: 1,
   restoreSession: true,
   autoSave: false,
+  autoReload: false,
   menuBar: false,
   editorFontSize: 14,
   lineNumbers: true,

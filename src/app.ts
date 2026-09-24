@@ -429,7 +429,9 @@ export class App {
             this.refreshUi();
           }
         } else if (mtime !== tab.mtime) {
-          if (!this.isDirty(tab)) {
+          // By default the user decides when to reload (banner); auto-reload is opt-in
+          // and never discards unsaved edits.
+          if (!this.isDirty(tab) && settings.get("autoReload")) {
             await this.reloadFromDisk(tab);
             if (tab === this.active) this.flash("Reloaded from disk");
           } else if (tab.external !== "changed") {
@@ -706,7 +708,9 @@ export class App {
     this.banner.hidden = false;
     this.banner.innerHTML =
       tab.external === "changed"
-        ? `<span>This file was changed by another program.</span><button class="btn small primary" data-act="reload">Reload</button><button class="btn small" data-act="keep">Keep my version</button>`
+        ? this.isDirty(tab)
+          ? `<span>This file was changed by another program. Reloading will discard your unsaved edits.</span><button class="btn small primary" data-act="reload">Reload</button><button class="btn small" data-act="keep">Keep my version</button>`
+          : `<span>This file was changed by another program.</span><button class="btn small primary" data-act="reload">Reload</button><button class="btn small" data-act="keep">Ignore</button>`
         : `<span>This file was deleted or moved.</span><button class="btn small primary" data-act="save">Save to recreate</button><button class="btn small" data-act="close">Close tab</button>`;
   }
 

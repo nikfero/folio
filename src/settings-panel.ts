@@ -42,6 +42,11 @@ function sections(opts: { menuBar: boolean }): Section[] {
         },
         { key: "restoreSession", label: "Reopen tabs on startup" },
         { key: "autoSave", label: "Auto-save", hint: "Save a second after you stop typing" },
+        {
+          key: "autoReload",
+          label: "Reload changed files automatically",
+          hint: "Otherwise Folio asks first when another program changes a file",
+        },
         ...(opts.menuBar ? [{ key: "menuBar", label: "Show menu bar" } as Row] : []),
       ],
     },
