@@ -107,3 +107,11 @@ export const readClipboard = (): Promise<string> =>
   readClipboardText()
     .catch(() => navigator.clipboard.readText())
     .catch(() => "");
+
+/** Saves image bytes into `<dir>/images/`; returns the relative path to link to. */
+export async function saveImage(dir: string, fileName: string, data: ArrayBuffer): Promise<string> {
+  const bytes = new Uint8Array(data);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return invoke<string>("save_image", { dir, fileName, data: btoa(binary) });
+}

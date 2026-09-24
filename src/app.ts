@@ -7,7 +7,8 @@ import { getVersion } from "@tauri-apps/api/app";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 
-import { createEditor, makeState, minimalReplace, setEditorConfig } from "./editor";
+import { createEditor, makeState, minimalReplace, onImagePaste, setEditorConfig } from "./editor";
+import { formatTable, insertLink, tableAt, toggleInline } from "./editing";
 import { Preview } from "./preview";
 import { ScrollMap, editorTopLine, revealLine, scrollEditorToLine } from "./scrollsync";
 import { FindBar } from "./find";
@@ -35,6 +36,7 @@ import {
   readText,
   menuVisible,
   resolvePath,
+  saveImage,
   setMenuVisible,
   writeText,
   type OpenRequest,
@@ -148,11 +150,21 @@ export class App {
     "prev-tab": () => this.cycleTab(-1),
     "move-tab": () => this.active && this.moveToNewWindow(this.active),
     "toggle-auto-reload": () => this.toggleAutoReload(),
+    "format-bold": () => this.format((v) => toggleInline(v, "**")),
+    "format-italic": () => this.format((v) => toggleInline(v, "*")),
+    "format-code": () => this.format((v) => toggleInline(v, "`")),
+    "format-strike": () => this.format((v) => toggleInline(v, "~~")),
+    "format-link": () => this.format((v) => void readClipboard().then((clip) => insertLink(v, clip))),
+    "format-table": () =>
+      this.format((v) => {
+        if (!formatTable(v)) toast("Put the cursor inside a Markdown table to format it.");
+      }),
   };
   private lastCommand = { id: "", source: "", time: 0 };
 
   constructor() {
     this.view = createEditor(this.editorPane, (u) => this.onEditorUpdate(u));
+    onImagePaste((file) => void this.pasteImage(file));
     this.preview = new Preview(this.previewPane, {
       onToggleTask: (line) => this.toggleTask(line),
       onLink: (href) => void this.followLink(href),
@@ -500,6 +512,12 @@ export class App {
       ["reveal", "Reveal in Folder"],
       ["move-tab", "Move Tab to New Window"],
       ["toggle-auto-reload", "Toggle Auto-reload for This File"],
+      ["format-bold", "Format: Bold", keys("B")],
+      ["format-italic", "Format: Italic", keys("I")],
+      ["format-code", "Format: Inline Code", keys("`")],
+      ["format-strike", "Format: Strikethrough", keys("Shift+X")],
+      ["format-link", "Format: Link", keys("K")],
+      ["format-table", "Format: Align Table Columns", isMac ? "⌥⇧F" : "Shift+Alt+F"],
       ["mode-read", "View: Read"],
       ["mode-split", "View: Split"],
       ["mode-edit", "View: Edit"],
@@ -1104,6 +1122,51 @@ export class App {
     ];
   }
 
+  // ------------------------------------------------------------ formatting
+
+  /** Runs a formatting command on the editor; the source has to be visible to edit it. */
+  private format(fn: (view: EditorView) => unknown): void {
+    if (!this.active) return;
+    if (this.active.mode === "read") {
+      toast("Switch to Edit or Split view to format text.");
+      return;
+    }
+    fn(this.view);
+  }
+
+  /** Saves a pasted or dropped image next to the document and links it at the cursor. */
+  private async pasteImage(file: File): Promise<void> {
+    const tab = this.active;
+    if (!tab) return;
+    if (!tab.path) {
+      toast("Save this document first, so Folio knows where to put the image.");
+      return;
+    }
+    const ext = ({ "image/jpeg": "jpg", "image/svg+xml": "svg" } as Record<string, string>)[file.type] ?? file.type.split("/")[1] ?? "png";
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}-${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}${String(d.getSeconds()).padStart(2, "0")}`;
+    // Screenshots arrive as a generic "image.png"; name them after the document instead.
+    const generic = !file.name || /^image\.\w+$/i.test(file.name);
+    const stem = basename(tab.path).replace(/\.[^.]+$/, "");
+    const name = generic ? `${stem}-${stamp}.${ext}` : file.name;
+    try {
+      const rel = await saveImage(dirname(tab.path), name, await file.arrayBuffer());
+      if (this.active !== tab) return;
+      const link = `![image](${rel.replace(/ /g, "%20")})`;
+      const { from, to } = this.view.state.selection.main;
+      this.view.dispatch({
+        changes: { from, to, insert: link },
+        selection: { anchor: from + 2, head: from + 7 }, // select "image" so it can be typed over
+        userEvent: "input.paste",
+        scrollIntoView: true,
+      });
+      this.view.focus();
+      this.flash(`Saved ${rel}`);
+    } catch (e) {
+      toast(`Couldn't save the image: ${e}`, "error");
+    }
+  }
+
   // ---------------------------------------------------------- context menus
 
   /** Replaces the webview's browser menu with Folio's own everywhere except plain text fields. */
@@ -1129,7 +1192,20 @@ export class App {
     view.focus();
     const range = view.state.selection.main;
     const text = view.state.sliceDoc(range.from, range.to);
+    const fmt = (label: string, id: string, shortcut?: string): MenuEntry => ({
+      label,
+      shortcut,
+      action: () => this.runCommand(id, "ui"),
+    });
+    const inTable = tableAt(view.state, range.head) !== null;
     return [
+      fmt("Bold", "format-bold", keys("B")),
+      fmt("Italic", "format-italic", keys("I")),
+      fmt("Code", "format-code", keys("`")),
+      fmt("Strikethrough", "format-strike", keys("Shift+X")),
+      fmt("Link", "format-link", keys("K")),
+      ...(inTable ? [fmt("Format Table", "format-table", isMac ? "⌥⇧F" : "Shift+Alt+F")] : []),
+      "separator",
       { label: "Undo", shortcut: keys("Z"), disabled: !undoDepth(view.state), action: () => undo(view) },
       { label: "Redo", shortcut: isMac ? "⌘⇧Z" : "Ctrl+Y", disabled: !redoDepth(view.state), action: () => redo(view) },
       "separator",

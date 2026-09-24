@@ -109,6 +109,8 @@ export function installMock(): void {
           return null;
         case "plugin:clipboard-manager|read_text":
           return clipboard;
+        case "save_image":
+          return `images/${String(args.fileName)}`;
         case "plugin:dialog|save":
           return "C:\\docs\\new-file.md";
         case "plugin:opener|open_url":

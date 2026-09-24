@@ -1,4 +1,4 @@
-import { Compartment, EditorState, type Extension, type StateEffect } from "@codemirror/state";
+import { Compartment, EditorState, Prec, type Extension, type StateEffect } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -12,7 +12,9 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches, search } from "@codemirror/search";
 import { HighlightStyle, syntaxHighlighting, indentOnInput, bracketMatching } from "@codemirror/language";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage, pasteURLAsLink } from "@codemirror/lang-markdown";
+import { formatTable, insertLink, toggleInline } from "./editing";
+import { readClipboard } from "./platform";
 import { languages } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
 
@@ -79,6 +81,51 @@ const theme = EditorView.theme({
 });
 
 let updateHandler: (u: ViewUpdate) => void = () => {};
+let imagePasteHandler: (file: File, view: EditorView) => void = () => {};
+
+/** Called with image files pasted or dropped into the editor. */
+export function onImagePaste(handler: (file: File, view: EditorView) => void): void {
+  imagePasteHandler = handler;
+}
+
+const imageFiles = (data: DataTransfer | null) =>
+  [...(data?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+
+const formattingKeys = Prec.high(
+  keymap.of([
+    { key: "Mod-b", run: (v) => toggleInline(v, "**") },
+    { key: "Mod-i", run: (v) => toggleInline(v, "*") },
+    { key: "Mod-`", run: (v) => toggleInline(v, "`") },
+    { key: "Mod-Shift-x", run: (v) => toggleInline(v, "~~") },
+    {
+      key: "Mod-k",
+      run: (v) => {
+        void readClipboard().then((clip) => insertLink(v, clip));
+        return true;
+      },
+    },
+    { key: "Shift-Alt-f", run: formatTable },
+  ]),
+);
+
+const imagePaste = EditorView.domEventHandlers({
+  paste(e, view) {
+    const files = imageFiles(e.clipboardData);
+    if (!files.length) return false;
+    e.preventDefault();
+    for (const f of files) imagePasteHandler(f, view);
+    return true;
+  },
+  drop(e, view) {
+    const files = imageFiles(e.dataTransfer);
+    if (!files.length) return false;
+    e.preventDefault();
+    const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+    if (pos != null) view.dispatch({ selection: { anchor: pos } });
+    for (const f of files) imagePasteHandler(f, view);
+    return true;
+  },
+});
 
 export interface EditorConfig {
   lineNumbers: boolean;
@@ -103,6 +150,9 @@ const extensions = (): Extension[] => [
   highlightSelectionMatches(),
   search({ top: true }),
   markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
+  pasteURLAsLink,
+  formattingKeys,
+  imagePaste,
   syntaxHighlighting(highlightStyle),
   theme,
   keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),

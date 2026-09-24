@@ -151,6 +151,31 @@ fn list_folder(root: String) -> Result<FolderListing, String> {
     Ok(FolderListing { files, truncated })
 }
 
+/// Saves a pasted image into `<dir>/images/`, picking a free name based on
+/// `file_name`. Returns the path relative to `dir` (with `/`), for the Markdown link.
+#[tauri::command]
+fn save_image(dir: String, file_name: String, data: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|e| e.to_string())?;
+    let images = Path::new(&dir).join("images");
+    std::fs::create_dir_all(&images).map_err(|e| e.to_string())?;
+    let clean: String = file_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || "-_.".contains(c) { c } else { '-' })
+        .collect();
+    let (stem, ext) = clean.rsplit_once('.').unwrap_or((&clean, "png"));
+    let mut name = format!("{stem}.{ext}");
+    let mut n = 2;
+    while images.join(&name).exists() {
+        name = format!("{stem}-{n}.{ext}");
+        n += 1;
+    }
+    std::fs::write(images.join(&name), bytes).map_err(|e| e.to_string())?;
+    Ok(format!("images/{name}"))
+}
+
 /// Modification time in ms, or None if the file no longer exists.
 #[tauri::command]
 fn file_mtime(path: String) -> Option<u64> {
@@ -444,6 +469,7 @@ pub fn run() {
             file_mtime,
             frontend_ready,
             list_folder,
+            save_image,
             new_window,
             menu_visible,
             set_menu_visible
