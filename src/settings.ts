@@ -8,6 +8,7 @@ export interface Settings {
   /** Whether the sidebar is visible. */
   toc: boolean;
   sidebarPanel: "files" | "outline";
+  sidebarWidth: number;
   split: number;
   zoom: number;
   restoreSession: boolean;
@@ -26,6 +27,7 @@ const defaults: Settings = {
   defaultMode: "read",
   toc: true,
   sidebarPanel: "outline",
+  sidebarWidth: 230,
   split: 0.5,
   zoom: 1,
   restoreSession: true,

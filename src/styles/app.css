@@ -368,7 +368,8 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
 }
 
 #toc {
-  width: 230px;
+  position: relative;
+  width: var(--sidebar-width, 230px);
   flex: none;
   overflow-y: auto;
   padding: 14px 8px 24px 10px;
@@ -425,16 +426,16 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.tree-close {
+.tree-action {
   width: 22px;
   height: 22px;
   opacity: 0;
 }
-.tree-folder:hover .tree-close,
-.tree-close:focus-visible {
+.tree-folder:hover .tree-action,
+.tree-action:focus-visible {
   opacity: 1;
 }
-.tree-folder .tree-close svg {
+.tree-folder .tree-action svg {
   width: 12px;
   height: 12px;
   color: inherit;
@@ -1196,4 +1197,41 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   padding: 14px;
   color: var(--fg-faint);
   text-align: center;
+}
+
+/* Drag handle on the sidebar's right edge */
+#sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 2;
+}
+#sidebar-resizer:hover,
+#sidebar-resizer.dragging {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Text prompt dialog */
+.modal-input {
+  width: 100%;
+  margin: 4px 0 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-alt);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.modal-input:focus {
+  border-color: var(--accent);
+}
+.modal .modal-error {
+  min-height: 1.3em;
+  margin: 0 0 8px;
+  color: var(--danger);
+  font-size: 12px;
 }

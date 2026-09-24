@@ -22,6 +22,8 @@ export interface FolderEntry {
 
 export interface FolderListing {
   files: FolderEntry[];
+  /** Empty folders, relative with `/`. */
+  dirs: string[];
   truncated: boolean;
 }
 
@@ -38,6 +40,10 @@ export const fileMtime = (path: string) => invoke<number | null>("file_mtime", {
 export const frontendReady = () => invoke<OpenRequest[]>("frontend_ready");
 
 export const listFolder = (root: string) => invoke<FolderListing>("list_folder", { root });
+export const createFile = (path: string) => invoke<void>("create_file", { path });
+export const createDir = (path: string) => invoke<void>("create_dir", { path });
+export const renamePath = (from: string, to: string) => invoke<void>("rename_path", { from, to });
+export const trashPath = (path: string) => invoke<void>("trash_path", { path });
 
 export const newWindow = (docs: OpenRequest[] = []) => invoke<void>("new_window", { docs });
 
@@ -78,6 +84,13 @@ export function resolvePath(base: string, rel: string): string {
  * (like the colon in "C:") would be flipped to the wrong side.
  */
 export const ltr = (text: string) => `\u200e${text}\u200e`;
+
+/** Joins a folder and a `/`-separated relative path using the folder's separator. */
+export function joinPath(dir: string, rel: string): string {
+  const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+  if (!rel) return dir;
+  return dir.replace(/[\\/]+$/, "") + sep + rel.split("/").join(sep);
+}
 
 /** Key used to detect that two paths point to the same file. */
 export function pathKey(p: string): string {

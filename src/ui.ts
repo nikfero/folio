@@ -113,6 +113,62 @@ export function dialog<T>(title: string, message: string, buttons: DialogButton<
   });
 }
 
+/**
+ * Asks for a line of text (e.g. a file name). Resolves with the trimmed text,
+ * or null if cancelled. `select` picks the part to pre-select, e.g. the name
+ * without its extension.
+ */
+export function promptDialog(
+  title: string,
+  opts: { value?: string; okLabel?: string; select?: [number, number]; validate?: (v: string) => string | null } = {},
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const box = document.createElement("form");
+    box.className = "modal";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.innerHTML = `<h2></h2><input class="modal-input" type="text" spellcheck="false"><p class="modal-error"></p><div class="modal-buttons"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary"></button></div>`;
+    box.querySelector("h2")!.textContent = title;
+    box.querySelector<HTMLButtonElement>("[type=submit]")!.textContent = opts.okLabel ?? "OK";
+    const input = box.querySelector("input")!;
+    const error = box.querySelector<HTMLElement>(".modal-error")!;
+    input.value = opts.value ?? "";
+    const done = (v: string | null) => {
+      document.removeEventListener("keydown", onKey, true);
+      backdrop.remove();
+      resolve(v);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        done(null);
+      }
+    };
+    box.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const v = input.value.trim();
+      const problem = !v ? "Please enter a name." : (opts.validate?.(v) ?? null);
+      if (problem) {
+        error.textContent = problem;
+        input.focus();
+        return;
+      }
+      done(v);
+    });
+    input.addEventListener("input", () => (error.textContent = ""));
+    box.querySelector("[data-cancel]")!.addEventListener("click", () => done(null));
+    document.addEventListener("keydown", onKey, true);
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+    input.focus();
+    const [a, b] = opts.select ?? [0, input.value.length];
+    input.setSelectionRange(a, b);
+  });
+}
+
 export type UnsavedChoice = "save" | "discard" | "cancel";
 
 export function confirmUnsaved(name: string): Promise<UnsavedChoice> {

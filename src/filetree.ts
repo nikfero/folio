@@ -10,12 +10,11 @@ interface DirNode {
   files: FolderEntry[];
 }
 
-function buildTree(files: FolderEntry[]): DirNode {
+function buildTree(files: FolderEntry[], emptyDirs: string[]): DirNode {
   const root: DirNode = { name: "", rel: "", dirs: new Map(), files: [] };
-  for (const f of files) {
-    const parts = f.rel.split("/");
+  const dirFor = (parts: string[]) => {
     let node = root;
-    for (const part of parts.slice(0, -1)) {
+    for (const part of parts) {
       let child = node.dirs.get(part);
       if (!child) {
         child = { name: part, rel: node.rel ? `${node.rel}/${part}` : part, dirs: new Map(), files: [] };
@@ -23,14 +22,25 @@ function buildTree(files: FolderEntry[]): DirNode {
       }
       node = child;
     }
-    node.files.push(f);
-  }
+    return node;
+  };
+  for (const d of emptyDirs) dirFor(d.split("/"));
+  for (const f of files) dirFor(f.rel.split("/").slice(0, -1)).files.push(f);
+  sortTree(root);
   return root;
+}
+
+function sortTree(node: DirNode): void {
+  const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+  node.dirs = new Map([...node.dirs.entries()].sort(([a], [b]) => byName(a, b)));
+  node.files.sort((a, b) => byName(basename(a.rel), basename(b.rel)));
+  for (const d of node.dirs.values()) sortTree(d);
 }
 
 export class FileTree {
   private root: string | null = null;
   private files: FolderEntry[] = [];
+  private emptyDirs: string[] = [];
   private expanded = new Set<string>();
   private activeKey = "";
 
@@ -41,6 +51,7 @@ export class FileTree {
       openFolder(path?: string): void;
       closeFolder(): void;
       recentFolders(): string[];
+      newFile(dirRel: string): void;
     },
   ) {
     el.addEventListener("click", (e) => {
@@ -49,6 +60,7 @@ export class FileTree {
       if (recent) return this.handlers.openFolder(recent.dataset.recentFolder);
       if (target.closest("[data-open-folder]")) return this.handlers.openFolder();
       if (target.closest("[data-close-folder]")) return this.handlers.closeFolder();
+      if (target.closest("[data-new-file]")) return this.handlers.newFile("");
       const row = target.closest<HTMLElement>(".tree-row");
       if (!row) return;
       if (row.dataset.dir !== undefined) {
@@ -71,10 +83,11 @@ export class FileTree {
   }
 
   /** Shows a folder's files; keeps the expanded state when the same folder is refreshed. */
-  setFolder(root: string | null, files: FolderEntry[], truncated = false): void {
+  setFolder(root: string | null, files: FolderEntry[], truncated = false, emptyDirs: string[] = []): void {
     const same = root !== null && this.root !== null && pathKey(root) === pathKey(this.root);
     this.root = root;
     this.files = files;
+    this.emptyDirs = emptyDirs;
     if (!same) {
       this.expanded.clear();
       // Small folders open fully; bigger ones start with only the top level visible.
@@ -93,6 +106,13 @@ export class FileTree {
     if (entry) this.expandParents(entry.rel);
     this.render();
     this.el.querySelector(".tree-row.active")?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** Expands a folder (by relative path) and its parents, e.g. after creating something in it. */
+  reveal(rel: string): void {
+    if (!rel) return;
+    this.expandParents(`${rel}/x`);
+    this.render();
   }
 
   contains(path: string): boolean {
@@ -129,8 +149,8 @@ export class FileTree {
       this.el.innerHTML = this.emptyState();
       return;
     }
-    const head = `<div class="tree-folder" title="${escapeAttr(this.root)}">${icons.folder}<span>${escapeText(basename(this.root))}</span><button class="icon-btn tree-close" data-close-folder title="Close Folder" aria-label="Close Folder">${icons.close}</button></div>`;
-    if (!this.files.length) {
+    const head = `<div class="tree-folder" title="${escapeAttr(this.root)}">${icons.folder}<span>${escapeText(basename(this.root))}</span><button class="icon-btn tree-action" data-new-file title="New File" aria-label="New File">${icons.plus}</button><button class="icon-btn tree-action" data-close-folder title="Close Folder" aria-label="Close Folder">${icons.close}</button></div>`;
+    if (!this.files.length && !this.emptyDirs.length) {
       this.el.innerHTML = `${head}<p class="tree-note">No Markdown files in this folder.</p>`;
       return;
     }
@@ -150,7 +170,7 @@ export class FileTree {
         );
       }
     };
-    walk(buildTree(this.files), 0);
+    walk(buildTree(this.files, this.emptyDirs), 0);
     const note = this.el.dataset.truncated === "true" ? `<p class="tree-note">Showing the first 10,000 files.</p>` : "";
     this.el.innerHTML = head + rows.join("") + note;
   }

@@ -72,6 +72,8 @@ const files = new Map<string, { text: string; mtime: number }>([
 ]);
 
 let clipboard = "";
+const emptyDirs = new Set<string>();
+const under = (p: string, dir: string) => p.toLowerCase().startsWith(dir.toLowerCase().replace(/[\\/]+$/, "") + "\\");
 
 export function installMock(): void {
   mockWindows("main");
@@ -99,10 +101,44 @@ export function installMock(): void {
         case "list_folder": {
           const root = String(args.root).replace(/[\\/]+$/, "") + "\\";
           const entries = [...files.keys()]
-            .filter((p) => p.toLowerCase().startsWith(root.toLowerCase()))
+            .filter((p) => p.toLowerCase().startsWith(root.toLowerCase()) && /\.md$/i.test(p))
             .sort()
             .map((p) => ({ path: p, rel: p.slice(root.length).replace(/\\/g, "/") }));
-          return { files: entries, truncated: false };
+          const dirs = [...emptyDirs]
+            .filter((d) => d.toLowerCase().startsWith(root.toLowerCase()) && ![...files.keys()].some((f) => under(f, d)))
+            .map((d) => d.slice(root.length).replace(/\\/g, "/"));
+          return { files: entries, dirs, truncated: false };
+        }
+        case "create_file": {
+          const path = String(args.path);
+          if (files.has(path)) throw new Error("File exists");
+          files.set(path, { text: "", mtime: Date.now() });
+          return null;
+        }
+        case "create_dir":
+          emptyDirs.add(String(args.path));
+          return null;
+        case "rename_path": {
+          const from = String(args.from);
+          const to = String(args.to);
+          if (files.has(to)) throw new Error("Something with that name already exists.");
+          for (const [p, f] of [...files]) {
+            if (p === from) {
+              files.delete(p);
+              files.set(to, f);
+            } else if (under(p, from)) {
+              files.delete(p);
+              files.set(to + p.slice(from.length), f);
+            }
+          }
+          if (emptyDirs.delete(from)) emptyDirs.add(to);
+          return null;
+        }
+        case "trash_path": {
+          const path = String(args.path);
+          for (const p of [...files.keys()]) if (p === path || under(p, path)) files.delete(p);
+          emptyDirs.delete(path);
+          return null;
         }
         case "plugin:clipboard-manager|write_text":
           clipboard = String((args as { text?: string }).text ?? "");

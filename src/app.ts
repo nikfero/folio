@@ -14,7 +14,7 @@ import { ScrollMap, editorTopLine, revealLine, scrollEditorToLine } from "./scro
 import { FindBar } from "./find";
 import { toggleTaskLine } from "./markdown";
 import { icons } from "./icons";
-import { closeMenu, confirmUnsaved, dialog, showMenu, toast, type MenuEntry } from "./ui";
+import { closeMenu, confirmUnsaved, dialog, promptDialog, showMenu, toast, type MenuEntry } from "./ui";
 import * as settings from "./settings";
 import { openSettings } from "./settings-panel";
 import { FileTree } from "./filetree";
@@ -22,7 +22,13 @@ import { openPalette, type PaletteItem, type PaletteSource } from "./palette";
 import {
   MARKDOWN_EXTS,
   basename,
+  createDir,
+  createFile,
   dirname,
+  isWindows,
+  joinPath,
+  renamePath,
+  trashPath,
   fileMtime,
   frontendReady,
   isMac,
@@ -106,6 +112,7 @@ export class App {
     openFolder: (path) => void (path ? this.openFolder(path) : this.openFolderDialog()),
     closeFolder: () => this.setFolder(null),
     recentFolders: () => settings.recentFolders(),
+    newFile: (dirRel) => void this.newFileIn(dirRel),
   });
   private banner = $("#banner");
   private welcome = $("#welcome");
@@ -422,7 +429,7 @@ export class App {
   async openFolder(path: string, quiet = false): Promise<boolean> {
     try {
       const listing = await listFolder(path);
-      this.fileTree.setFolder(path, listing.files, listing.truncated);
+      this.fileTree.setFolder(path, listing.files, listing.truncated, listing.dirs);
       this.fileTree.setActive(this.active?.path ?? null);
       this.workspace.classList.add("has-folder");
       settings.addRecentFolder(path);
@@ -449,17 +456,123 @@ export class App {
   private refreshingFolder = false;
 
   /** Re-reads the open folder so new, renamed and deleted files show up. */
-  private async refreshFolder(): Promise<void> {
+  private async refreshFolder(force = false): Promise<void> {
     const folder = this.fileTree.folder;
-    if (!folder || this.refreshingFolder || document.visibilityState !== "visible") return;
+    if (!folder || (!force && (this.refreshingFolder || document.visibilityState !== "visible"))) return;
     this.refreshingFolder = true;
     try {
       const listing = await listFolder(folder);
-      if (this.fileTree.folder === folder) this.fileTree.setFolder(folder, listing.files, listing.truncated);
+      if (this.fileTree.folder === folder) this.fileTree.setFolder(folder, listing.files, listing.truncated, listing.dirs);
     } catch {
       /* folder gone; keep showing the last listing */
     } finally {
       this.refreshingFolder = false;
+    }
+  }
+
+  // --------------------------------------------------------- file actions
+
+  private readonly trashName = isWindows ? "Recycle Bin" : "Trash";
+
+  private validName = (name: string): string | null =>
+    /[\\/:*?"<>|]/.test(name) ? 'Names can\'t contain \\ / : * ? " < > |' : /^\.+$/.test(name) ? "That isn't a valid name." : null;
+
+  private async newFileIn(dirRel: string): Promise<void> {
+    const folder = this.fileTree.folder;
+    if (!folder) return;
+    const name = await promptDialog("New file", { value: "Untitled.md", okLabel: "Create", select: [0, 8], validate: this.validName });
+    if (!name) return;
+    const fileName = /\.[^.]+$/.test(name) ? name : `${name}.md`;
+    const path = joinPath(joinPath(folder, dirRel), fileName);
+    try {
+      await createFile(path);
+      await this.refreshFolder(true);
+      this.fileTree.reveal(dirRel);
+      await this.openPath(path, { tab: { mode: "split" } });
+      this.view.focus();
+    } catch (e) {
+      toast(`Couldn't create ${fileName}: ${e}`, "error");
+    }
+  }
+
+  private async newFolderIn(dirRel: string): Promise<void> {
+    const folder = this.fileTree.folder;
+    if (!folder) return;
+    const name = await promptDialog("New folder", { value: "New folder", okLabel: "Create", validate: this.validName });
+    if (!name) return;
+    try {
+      await createDir(joinPath(joinPath(folder, dirRel), name));
+      await this.refreshFolder(true);
+      this.fileTree.reveal(dirRel ? `${dirRel}/${name}` : name);
+    } catch (e) {
+      toast(`Couldn't create the folder: ${e}`, "error");
+    }
+  }
+
+  private async renameItem(path: string, isDir: boolean): Promise<void> {
+    const old = basename(path);
+    const stemLength = isDir ? old.length : old.replace(/\.[^.]+$/, "").length || old.length;
+    const name = await promptDialog(isDir ? "Rename folder" : "Rename file", {
+      value: old,
+      okLabel: "Rename",
+      select: [0, stemLength],
+      validate: this.validName,
+    });
+    if (!name || name === old) return;
+    const to = joinPath(dirname(path), name);
+    try {
+      await renamePath(path, to);
+      this.retargetTabs(path, to);
+      if (!isDir) {
+        settings.removeRecent(path);
+        settings.addRecent(to);
+      }
+      await this.refreshFolder(true);
+    } catch (e) {
+      toast(`Couldn't rename ${old}: ${e}`, "error");
+    }
+  }
+
+  /** Points open tabs at their new location after a rename or move. */
+  private retargetTabs(from: string, to: string): void {
+    const key = pathKey(from);
+    for (const tab of this.tabs) {
+      if (!tab.path) continue;
+      const k = pathKey(tab.path);
+      if (k === key) tab.path = to;
+      else if (k.startsWith(`${key}/`)) tab.path = to + tab.path.slice(from.length);
+      else continue;
+      tab.external = null;
+    }
+    this.refreshUi();
+  }
+
+  private async deleteItem(path: string, isDir: boolean): Promise<void> {
+    const name = basename(path);
+    const ok = await dialog(
+      `Move “${name}” to the ${this.trashName}?`,
+      isDir
+        ? `The folder and everything in it will be moved. You can restore it from the ${this.trashName}.`
+        : `You can restore it from the ${this.trashName}.`,
+      [
+        { label: "Cancel", value: false },
+        { label: `Move to ${this.trashName}`, value: true, primary: true },
+      ],
+      false,
+    );
+    if (!ok) return;
+    try {
+      await trashPath(path);
+      // Close tabs of removed files; ones with unsaved edits stay open (and show the "deleted" banner).
+      const key = pathKey(path);
+      for (const tab of [...this.tabs]) {
+        const k = tab.path ? pathKey(tab.path) : "";
+        if ((k === key || k.startsWith(`${key}/`)) && !this.isDirty(tab)) this.removeTab(tab, true);
+      }
+      settings.removeRecent(path);
+      await this.refreshFolder(true);
+    } catch (e) {
+      toast(`Couldn't move ${name} to the ${this.trashName}: ${e}`, "error");
     }
   }
 
@@ -1032,6 +1145,7 @@ export class App {
     this.view.dispatch({ effects });
     for (const t of this.tabs) if (t !== this.active) t.state = t.state.update({ effects }).state;
     this.tocEl.hidden = !settings.get("toc");
+    this.tocEl.style.setProperty("--sidebar-width", `${settings.get("sidebarWidth")}px`);
     this.applySidebarPanel();
     this.workspace.style.setProperty("--split", String(settings.get("split")));
     this.scrollMap.invalidate();
@@ -1296,13 +1410,33 @@ export class App {
           action: () => void newWindow([{ path, content: null }]).catch((e) => toast(String(e), "error")),
         },
         "separator",
+        { label: "Rename…", action: () => void this.renameItem(path, false) },
+        { label: `Move to ${this.trashName}…`, action: () => void this.deleteItem(path, false) },
+        "separator",
         { label: "Copy Path", action: () => void writeClipboard(path) },
         { label: "Reveal in Folder", action: () => reveal(path) },
       ];
     const folder = this.fileTree.folder;
     if (!folder) return [{ label: "Open Folder…", shortcut: keys("Shift+F"), action: () => void this.openFolderDialog() }];
+    const dirRel = target.closest<HTMLElement>(".tree-row.dir")?.dataset.dir;
+    if (dirRel !== undefined) {
+      const dirPath = joinPath(folder, dirRel);
+      return [
+        { label: "New File…", action: () => void this.newFileIn(dirRel) },
+        { label: "New Folder…", action: () => void this.newFolderIn(dirRel) },
+        "separator",
+        { label: "Rename…", action: () => void this.renameItem(dirPath, true) },
+        { label: `Move to ${this.trashName}…`, action: () => void this.deleteItem(dirPath, true) },
+        "separator",
+        { label: "Copy Path", action: () => void writeClipboard(dirPath) },
+        { label: "Reveal in File Manager", action: () => reveal(dirPath) },
+      ];
+    }
     return [
-      { label: "Refresh", action: () => void this.refreshFolder() },
+      { label: "New File…", action: () => void this.newFileIn("") },
+      { label: "New Folder…", action: () => void this.newFolderIn("") },
+      "separator",
+      { label: "Refresh", action: () => void this.refreshFolder(true) },
       { label: "Copy Folder Path", action: () => void writeClipboard(folder) },
       { label: "Reveal in File Manager", action: () => reveal(folder) },
       "separator",
@@ -1413,6 +1547,33 @@ export class App {
       },
       { passive: false },
     );
+
+    // Sidebar resize handle
+    const resizer = $("#sidebar-resizer");
+    resizer.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      resizer.setPointerCapture(e.pointerId);
+      resizer.classList.add("dragging");
+      const left = this.tocEl.getBoundingClientRect().left;
+      let width = settings.get("sidebarWidth");
+      const move = (ev: PointerEvent) => {
+        width = Math.round(Math.min(520, Math.max(160, ev.clientX - left)));
+        this.tocEl.style.setProperty("--sidebar-width", `${width}px`);
+      };
+      const up = () => {
+        resizer.removeEventListener("pointermove", move);
+        resizer.removeEventListener("pointerup", up);
+        resizer.classList.remove("dragging");
+        settings.set("sidebarWidth", width);
+        this.scrollMap.invalidate();
+      };
+      resizer.addEventListener("pointermove", move);
+      resizer.addEventListener("pointerup", up);
+    });
+    resizer.addEventListener("dblclick", () => {
+      settings.set("sidebarWidth", 230);
+      this.tocEl.style.setProperty("--sidebar-width", "230px");
+    });
 
     // Split divider
     const divider = $("#divider");

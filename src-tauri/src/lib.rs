@@ -99,7 +99,14 @@ struct FolderEntry {
 #[derive(Serialize)]
 struct FolderListing {
     files: Vec<FolderEntry>,
+    /// Empty folders (relative, `/`-separated), so newly created folders show up.
+    dirs: Vec<String>,
     truncated: bool,
+}
+
+fn rel_path(path: &Path, root: &Path) -> String {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
 }
 
 fn is_markdown(path: &Path) -> bool {
@@ -108,9 +115,12 @@ fn is_markdown(path: &Path) -> bool {
         .is_some_and(|e| MARKDOWN_EXTS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
-fn walk(dir: &Path, root: &Path, depth: usize, out: &mut Vec<FolderEntry>) -> bool {
+fn walk(dir: &Path, root: &Path, depth: usize, out: &mut Vec<FolderEntry>, empty: &mut Vec<String>) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else { return false };
     let mut entries: Vec<_> = entries.flatten().collect();
+    if entries.is_empty() && dir != root {
+        empty.push(rel_path(dir, root));
+    }
     entries.sort_by_key(|e| e.file_name().to_ascii_lowercase());
     for entry in entries {
         let name = entry.file_name();
@@ -122,17 +132,16 @@ fn walk(dir: &Path, root: &Path, depth: usize, out: &mut Vec<FolderEntry>) -> bo
         let Ok(kind) = entry.file_type() else { continue };
         let path = entry.path();
         if kind.is_dir() {
-            if depth < 16 && !SKIP_DIRS.contains(&name.as_ref()) && walk(&path, root, depth + 1, out) {
+            if depth < 16 && !SKIP_DIRS.contains(&name.as_ref()) && walk(&path, root, depth + 1, out, empty) {
                 return true;
             }
         } else if kind.is_file() && is_markdown(&path) {
             if out.len() >= MAX_FILES {
                 return true;
             }
-            let rel = path.strip_prefix(root).unwrap_or(&path);
             out.push(FolderEntry {
+                rel: rel_path(&path, root),
                 path: path.to_string_lossy().into_owned(),
-                rel: rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"),
             });
         }
     }
@@ -147,8 +156,57 @@ fn list_folder(root: String) -> Result<FolderListing, String> {
         return Err(format!("{} is not a folder", root.display()));
     }
     let mut files = Vec::new();
-    let truncated = walk(&root, &root, 0, &mut files);
-    Ok(FolderListing { files, truncated })
+    let mut dirs = Vec::new();
+    let truncated = walk(&root, &root, 0, &mut files, &mut dirs);
+    Ok(FolderListing { files, dirs, truncated })
+}
+
+/// Creates an empty file; fails if something already exists at `path`.
+#[tauri::command]
+fn create_file(path: String) -> Result<(), String> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_dir(path: String) -> Result<(), String> {
+    if Path::new(&path).exists() {
+        return Err("Something with that name already exists.".into());
+    }
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())
+}
+
+/// Renames or moves a file or folder without overwriting anything.
+#[tauri::command]
+fn rename_path(from: String, to: String) -> Result<(), String> {
+    let (src, dst) = (Path::new(&from), Path::new(&to));
+    // A case-only rename ("a.md" -> "A.md") on a case-insensitive disk finds the
+    // target "existing"; go through a temporary name instead.
+    let case_only = from != to
+        && from.to_lowercase() == to.to_lowercase()
+        && std::fs::canonicalize(src).ok() == std::fs::canonicalize(dst).ok();
+    if dst.exists() && !case_only {
+        return Err("Something with that name already exists.".into());
+    }
+    if case_only {
+        let tmp = src.with_file_name(format!(
+            ".folio-rename-{}",
+            std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default()
+        ));
+        std::fs::rename(src, &tmp).map_err(|e| e.to_string())?;
+        return std::fs::rename(&tmp, dst).map_err(|e| e.to_string());
+    }
+    std::fs::rename(src, dst).map_err(|e| e.to_string())
+}
+
+/// Moves a file or folder to the Recycle Bin / Trash (never deletes outright).
+#[tauri::command]
+fn trash_path(path: String) -> Result<(), String> {
+    trash::delete(&path).map_err(|e| e.to_string())
 }
 
 /// Saves a pasted image into `<dir>/images/`, picking a free name based on
@@ -469,6 +527,10 @@ pub fn run() {
             file_mtime,
             frontend_ready,
             list_folder,
+            create_file,
+            create_dir,
+            rename_path,
+            trash_path,
             save_image,
             new_window,
             menu_visible,
