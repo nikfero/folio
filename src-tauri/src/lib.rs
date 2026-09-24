@@ -319,7 +319,29 @@ fn save_image(dir: String, file_name: String, data: String) -> Result<String, St
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data)
         .map_err(|e| e.to_string())?;
-    let images = Path::new(&dir).join("images");
+    let (path, rel) = unique_image_path(Path::new(&dir), &file_name)?;
+    std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+    Ok(rel)
+}
+
+/// Copies an image file (dropped from the file manager) into `<dir>/images/`;
+/// returns its path relative to `dir`.
+#[tauri::command]
+fn copy_image(dir: String, source: String) -> Result<String, String> {
+    let source = Path::new(&source);
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "image.png".into());
+    let (path, rel) = unique_image_path(Path::new(&dir), &name)?;
+    std::fs::copy(source, path).map_err(|e| e.to_string())?;
+    Ok(rel)
+}
+
+/// A free `images/<name>` path under `dir` (creating the folder), with the
+/// name cleaned of characters that would need escaping in a Markdown link.
+fn unique_image_path(dir: &Path, file_name: &str) -> Result<(PathBuf, String), String> {
+    let images = dir.join("images");
     std::fs::create_dir_all(&images).map_err(|e| e.to_string())?;
     let clean: String = file_name
         .chars()
@@ -332,8 +354,7 @@ fn save_image(dir: String, file_name: String, data: String) -> Result<String, St
         name = format!("{stem}-{n}.{ext}");
         n += 1;
     }
-    std::fs::write(images.join(&name), bytes).map_err(|e| e.to_string())?;
-    Ok(format!("images/{name}"))
+    Ok((images.join(&name), format!("images/{name}")))
 }
 
 /// Modification time in ms, or None if the file no longer exists.
@@ -679,6 +700,7 @@ pub fn run() {
             rename_path,
             trash_path,
             save_image,
+            copy_image,
             new_window,
             menu_visible,
             set_menu_visible

@@ -172,6 +172,8 @@ export function installMock(): void {
           return `images/${String(args.fileName)}`;
         case "plugin:dialog|save":
           return "C:\\docs\\new-file.md";
+        case "copy_image":
+          return `images/${String((args as { source: string }).source).split(/[\\/]/).pop()}`;
         case "plugin:opener|open_url":
           window.open(String((args as { url?: string }).url), "_blank");
           return null;

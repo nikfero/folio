@@ -38,8 +38,10 @@ import { openPalette, type PaletteItem, type PaletteSource } from "./palette";
 import {
   MARKDOWN_EXTS,
   basename,
+  copyImage,
   createDir,
   createFile,
+  isImagePath,
   dirname,
   isWindows,
   joinPath,
@@ -1586,6 +1588,61 @@ export class App {
   }
 
   /** Saves a pasted or dropped image next to the document and links it at the cursor. */
+  /** The editor position under a drag-and-drop point (physical pixels), or null when it's not over the text. */
+  private editorPosAt(point: { x: number; y: number }): number | null {
+    const ratio = window.devicePixelRatio || 1;
+    const x = point.x / ratio;
+    const y = point.y / ratio;
+    const under = document.elementFromPoint(x, y);
+    if (!under || !this.view.contentDOM.contains(under)) return null;
+    return this.view.posAtCoords({ x, y });
+  }
+
+  /** Images can go into the active document when its editor is showing. */
+  private canInsertImages(): boolean {
+    return !!this.active && this.active.mode !== "read";
+  }
+
+  /**
+   * Inserts dropped image files at the drop point: images already inside the
+   * document's folder are linked where they are, others are copied to images/.
+   */
+  private async insertImageFiles(paths: string[], at: number | null): Promise<void> {
+    const tab = this.active;
+    if (!tab) return;
+    if (tab.mode === "read") {
+      toast("Switch to Live, Split or Edit view to insert images.");
+      return;
+    }
+    if (!tab.path) {
+      toast("Save this document first, so Folio knows where to put the image.");
+      return;
+    }
+    const dir = dirname(tab.path);
+    const links: string[] = [];
+    for (const path of paths) {
+      try {
+        const inside = pathKey(path).startsWith(pathKey(dir) + "/");
+        const rel = inside ? path.slice(dir.length + 1).replace(/\\/g, "/") : await copyImage(dir, path);
+        const alt = basename(path).replace(/\.[^.]+$/, "");
+        links.push(`![${alt}](${encodeURI(rel)})`);
+        if (!inside) this.flash(`Copied to ${rel}`);
+      } catch (e) {
+        toast(`Couldn't add ${basename(path)}: ${e}`, "error");
+      }
+    }
+    if (!links.length || this.active !== tab) return;
+    const pos = at ?? this.view.state.selection.main.head;
+    const insert = links.join("\n");
+    this.view.dispatch({
+      changes: { from: pos, insert },
+      selection: { anchor: pos + insert.length },
+      userEvent: "input.drop",
+      scrollIntoView: true,
+    });
+    this.view.focus();
+  }
+
   private async pasteImage(file: File): Promise<void> {
     const tab = this.active;
     if (!tab) return;
@@ -2077,10 +2134,31 @@ export class App {
     const overlay = $("#drop-overlay");
     await this.win.onDragDropEvent((e) => {
       const p = e.payload;
-      if (p.type === "enter" || p.type === "over") overlay.hidden = false;
-      else if (p.type === "leave") overlay.hidden = true;
+      if (p.type === "enter") {
+        const images = p.paths.length > 0 && p.paths.every(isImagePath) && this.canInsertImages();
+        overlay.classList.toggle("images", images);
+        overlay.querySelector("div")!.textContent = images
+          ? `Drop to insert ${p.paths.length > 1 ? "images" : "the image"}`
+          : "Drop to open";
+      }
+      if (p.type === "enter" || p.type === "over") {
+        overlay.hidden = false;
+        if (overlay.classList.contains("images")) {
+          // Move the cursor under the pointer to show where the images will go.
+          const pos = this.editorPosAt(p.position);
+          if (pos != null && pos !== this.view.state.selection.main.head) {
+            this.view.dispatch({ selection: { anchor: pos } });
+            this.view.focus();
+          }
+        }
+      } else if (p.type === "leave") overlay.hidden = true;
       else if (p.type === "drop") {
         overlay.hidden = true;
+        const images = p.paths.filter(isImagePath);
+        if (images.length && images.length === p.paths.length) {
+          void this.insertImageFiles(images, this.editorPosAt(p.position));
+          return;
+        }
         void (async () => {
           for (const path of p.paths) {
             if (isMarkdownPath(path)) await this.openPath(path);

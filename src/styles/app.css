@@ -1034,6 +1034,17 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   font-size: 16px;
   font-weight: 500;
 }
+/* Dragging images: the editor's cursor shows where they will go, so only a label is shown. */
+#drop-overlay.images {
+  background: none;
+  place-items: end center;
+  padding-bottom: 48px;
+}
+#drop-overlay.images div {
+  padding: 8px 16px;
+  font-size: 13px;
+  box-shadow: var(--shadow);
+}
 
 /* --------------------------------------------------------------- settings */
 

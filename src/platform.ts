@@ -138,5 +138,11 @@ export async function saveImage(dir: string, fileName: string, data: ArrayBuffer
   return invoke<string>("save_image", { dir, fileName, data: btoa(binary) });
 }
 
+/** Copies an image file into `<dir>/images/`; returns the path relative to `dir`. */
+export const copyImage = (dir: string, source: string) => invoke<string>("copy_image", { dir, source });
+
+const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "ico"];
+export const isImagePath = (path: string) => IMAGE_EXTS.includes(path.split(".").pop()?.toLowerCase() ?? "");
+
 /** Opens the system print dialog (the web API is unavailable in macOS's web view). */
 export const printWindow = () => (isMac ? invoke<void>("print_window") : Promise.resolve(window.print()));
