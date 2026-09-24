@@ -1632,53 +1632,130 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
 
 /* ------------------------------------------------------------- focus mode */
 
+/* The window's chrome slides away; only the text is left, in a centered column. */
 .focus-mode #topbar,
 .focus-mode #statusbar,
 .focus-mode #toc,
-.focus-mode #sidebar-resizer {
+.focus-mode #sidebar-resizer,
+.focus-mode #divider {
   display: none !important;
 }
-.focus-mode #editor-pane .cm-content {
-  max-width: var(--content-width, 820px);
-  margin: 0 auto;
+.focus-mode #workspace {
+  animation: focus-in 0.35s ease-out;
+}
+@keyframes focus-in {
+  from {
+    opacity: 0;
+  }
 }
 .focus-mode #editor-pane .cm-gutters {
   display: none;
 }
+.focus-mode #editor-pane .cm-content {
+  max-width: min(var(--content-width, 820px), 760px);
+  margin: 0 auto;
+  padding: 12vh 0 50vh !important;
+}
+.focus-mode #editor-pane .cm-line {
+  padding: 0 48px !important;
+}
+.focus-mode #editor-pane .cm-editor:not(.cm-live) .cm-scroller {
+  line-height: 1.75;
+}
+.focus-mode #editor-pane .cm-typewriter .cm-content {
+  padding-top: 45vh !important;
+}
 .focus-mode .cm-activeLine {
+  background: transparent !important;
+}
+.focus-mode #preview-pane .markdown-body {
+  padding-top: 12vh;
+  padding-bottom: 30vh;
+}
+.focus-mode ::-webkit-scrollbar-thumb {
   background: transparent;
 }
+.focus-mode :hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg-faint) 35%, transparent);
+}
+
+/* Everything but the sentence / paragraph being written fades. */
 .cm-focus-dim .cm-line,
 .cm-focus-dim .cm-live-block {
-  opacity: 0.28;
-  transition: opacity 0.2s;
+  opacity: 0.3;
+  transition: opacity 0.25s ease;
 }
 .cm-focus-dim .cm-line.cm-focus-current {
   opacity: 1;
 }
-/* A hint to leave focus mode, shown when the pointer reaches the top edge. */
-#focus-exit {
+.cm-focus-faded {
+  opacity: 0.3;
+}
+
+/* The bar at the bottom, shown while the pointer moves and hidden while typing. */
+#focus-bar {
   display: none;
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  left: 50%;
+  bottom: 18px;
   z-index: 40;
-  height: 44px;
-  justify-content: center;
   align-items: center;
+  gap: 2px;
+  padding: 4px;
+  font: 12px var(--font-ui);
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--bg-alt) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
   opacity: 0;
-  transition: opacity 0.2s;
+  transform: translate(-50%, 8px);
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
 }
-.focus-mode #focus-exit {
+.focus-mode #focus-bar {
   display: flex;
 }
-.focus-mode #focus-exit:hover {
+.focus-bar-shown #focus-bar,
+.focus-mode #focus-bar:hover {
   opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
 }
-#focus-exit .btn {
-  box-shadow: var(--shadow);
+#focus-words {
+  padding: 0 10px 0 12px;
+  font-variant-numeric: tabular-nums;
 }
-#focus-exit kbd {
-  margin-left: 6px;
+#focus-bar button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+#focus-bar button[hidden] {
+  display: none;
+}
+#focus-bar button:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+#focus-bar button[aria-pressed="true"] {
+  color: var(--accent);
+}
+#focus-bar button[data-focus="exit"] {
+  margin-left: 4px;
+  border-left: 1px solid var(--border);
+  border-radius: 0 999px 999px 0;
+}
+#focus-bar kbd {
+  margin-left: 4px;
+  font-size: 10px;
 }

@@ -15,7 +15,7 @@ import { HighlightStyle, syntaxHighlighting, indentOnInput, bracketMatching } fr
 import { markdown, markdownLanguage, pasteURLAsLink } from "@codemirror/lang-markdown";
 import { formatTable, insertLink, toggleInline } from "./editing";
 import { livePreview, type LiveOptions } from "./livepreview";
-import { focusDimming } from "./focus";
+import { focusExtension, type FocusOptions } from "./focus";
 export { refreshLiveBlocks } from "./liveblocks";
 import { readClipboard } from "./platform";
 import { languages } from "@codemirror/language-data";
@@ -140,12 +140,16 @@ const gutter = new Compartment();
 const wrap = new Compartment();
 const live = new Compartment();
 const focus = new Compartment();
-const focusExt = focusDimming();
+const focusExts = new Map<string, Extension>();
 
-/** Turns paragraph dimming (focus mode) on or off for the editor's current document. */
-export function setFocusDim(view: EditorView, on: boolean): void {
-  const isOn = focus.get(view.state) === focusExt;
-  if (isOn !== on) view.dispatch({ effects: focus.reconfigure(on ? focusExt : []) });
+/** Sets focus mode's highlighting and typewriter scrolling for the editor's document; null turns both off. */
+export function setFocus(view: EditorView, opts: FocusOptions | null): void {
+  const key = opts ? `${opts.highlight}:${opts.typewriter}` : "";
+  if (key && !focusExts.has(key)) focusExts.set(key, focusExtension(opts!));
+  const ext = focusExts.get(key) ?? [];
+  if (focus.get(view.state) === ext) return;
+  view.dispatch({ effects: focus.reconfigure(ext) });
+  if (opts?.typewriter) view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "center" }) });
 }
 let liveExt: Extension = [];
 

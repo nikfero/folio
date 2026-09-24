@@ -82,6 +82,11 @@
     </footer>
 
     <div id="drop-overlay" hidden><div>Drop to open</div></div>
-    <div id="focus-exit"><button class="btn small">Exit focus mode <kbd>Esc</kbd></button></div>
+    <div id="focus-bar" role="toolbar" aria-label="Focus mode">
+      <span id="focus-words"></span>
+      <button data-focus="highlight" title="What stays bright while you write">Highlight: <span></span></button>
+      <button data-focus="typewriter" title="Keep the line you're writing in the middle of the screen">Typewriter</button>
+      <button data-focus="exit" title="Leave focus mode">Exit <kbd>Esc</kbd></button>
+    </div>
   </body>
 </html>

@@ -16,7 +16,7 @@ import {
   onImagePaste,
   refreshLiveBlocks,
   setEditorConfig,
-  setFocusDim,
+  setFocus,
   setLive,
 } from "./editor";
 import { isPaletteOpen } from "./palette";
@@ -90,6 +90,7 @@ interface Tab {
 const mod = isMac ? "⌘" : "Ctrl+";
 /** Formats a shortcut like "Shift+P" for the current OS ("⌘⇧P" or "Ctrl+Shift+P"). */
 const keys = (combo: string) => (isMac ? `⌘${combo.replace("Shift+", "⇧")}` : `Ctrl+${combo}`);
+const FULLSCREEN_KEY = isMac ? "⌃⌘F" : "F11";
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const SERIF = 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif';
 const WIDTHS = { narrow: "680px", medium: "820px", wide: "1040px", full: "none" } as const;
@@ -148,7 +149,9 @@ export class App {
   private wordCount = 0;
   private restoring = true;
   private focusMode = false;
-  private focusWentFullscreen = false;
+  /** The view mode focus mode replaced (Split becomes Live), restored on exit. */
+  private focusRestoreMode: Mode | null = null;
+  private focusBarTimer = 0;
   private version = "dev";
 
   /** Every user-facing action, addressed by the same ids as the native menu items. */
@@ -186,6 +189,7 @@ export class App {
     "move-tab": () => this.active && this.moveToNewWindow(this.active),
     "toggle-auto-reload": () => this.toggleAutoReload(),
     "toggle-focus": () => this.setFocusMode(!this.focusMode),
+    "toggle-fullscreen": () => this.toggleFullscreen(),
     "export-html": () => this.exportHtml(),
     print: () => this.print(),
     "format-bold": () => this.format((v) => toggleInline(v, "**")),
@@ -714,7 +718,8 @@ export class App {
       ["next-tab", "Next Tab", "Ctrl+Tab"],
       ["prev-tab", "Previous Tab", "Ctrl+Shift+Tab"],
       ["toggle-theme", "Toggle Light / Dark Theme"],
-      ["toggle-focus", "Toggle Focus Mode", "F11"],
+      ["toggle-focus", "Toggle Focus Mode", keys("Shift+Enter")],
+      ["toggle-fullscreen", "Toggle Full Screen", FULLSCREEN_KEY],
       ["zoom-in", "Zoom In", keys("=")],
       ["zoom-out", "Zoom Out", keys("-")],
       ["zoom-reset", "Actual Size", keys("0")],
@@ -1014,7 +1019,12 @@ export class App {
     const mode = this.active?.mode ?? "read";
     if (this.active) {
       setLive(this.view, mode === "live");
-      setFocusDim(this.view, this.focusMode && settings.get("focusDim") && editorOnly(mode));
+      setFocus(
+        this.view,
+        this.focusMode && mode !== "read"
+          ? { highlight: settings.get("focusHighlight"), typewriter: settings.get("focusTypewriter") }
+          : null,
+      );
     }
     this.workspace.dataset.mode = this.active ? mode : "none";
     for (const b of document.querySelectorAll<HTMLElement>("#modes button"))
@@ -1172,6 +1182,7 @@ export class App {
     const words = this.wordCount;
     $("#st-words").textContent = `${words.toLocaleString()} ${words === 1 ? "word" : "words"} · ${Math.max(1, Math.round(words / 230))} min read`;
     $("#st-eol").textContent = tab.eol === "\r\n" ? "CRLF" : "LF";
+    this.updateFocusBar();
 
     const reload = $("#st-reload");
     reload.hidden = !tab.path;
@@ -1242,7 +1253,8 @@ export class App {
     this.workspace.style.setProperty("--split", String(settings.get("split")));
     this.scrollMap.invalidate();
     this.updateStatus(); // the auto-reload indicator follows the global default
-    this.applyMode(); // focus dimming follows its setting
+    this.applyMode(); // focus highlighting follows its settings
+    this.updateFocusBar();
   }
 
   private showSettings(): void {
@@ -1290,7 +1302,8 @@ export class App {
       item("Command Palette…", "command-palette", keys("Shift+P")),
       item("Find", "find", keys("F"), !tab),
       item("Toggle Sidebar", "toggle-sidebar", keys("\\")),
-      item("Focus Mode", "toggle-focus", "F11", !tab),
+      item("Focus Mode", "toggle-focus", keys("Shift+Enter"), !tab),
+      item("Full Screen", "toggle-fullscreen", FULLSCREEN_KEY),
       item("Reload from Disk", "reload", undefined, !tab?.path),
       item("Reveal in Folder", "reveal", undefined, !tab?.path),
       "separator",
@@ -1334,27 +1347,93 @@ export class App {
 
   // ------------------------------------------------------------ focus mode
 
-  /** Full screen with only the text: no tabs, toolbar, sidebar or status bar. */
-  private async setFocusMode(on: boolean): Promise<void> {
-    if (on === this.focusMode) return;
+  /** Only the text, in a calm centered column; a small bar at the bottom appears when the pointer moves. */
+  private setFocusMode(on: boolean): void {
+    if (on === this.focusMode || (on && !this.active)) return;
     this.focusMode = on;
-    document.documentElement.classList.toggle("focus-mode", on);
     closeMenu();
     if (on && this.find.isOpen) this.find.close();
-    this.applyMode();
-    try {
-      if (on) {
-        this.focusWentFullscreen = !(await this.win.isFullscreen());
-        if (this.focusWentFullscreen) await this.win.setFullscreen(true);
-      } else if (this.focusWentFullscreen) {
-        await this.win.setFullscreen(false);
-      }
-    } catch {
-      /* full screen isn't essential */
+    if (on && this.active!.mode === "split") {
+      this.focusRestoreMode = "split";
+      this.setMode("live");
+    } else if (!on && this.focusRestoreMode) {
+      if (this.active?.mode === "live") this.setMode(this.focusRestoreMode);
+      this.focusRestoreMode = null;
     }
+    document.documentElement.classList.toggle("focus-mode", on);
+    this.applyMode();
+    this.updateFocusBar();
     this.scrollMap.invalidate();
-    if (on && this.active && this.active.mode !== "read") this.view.focus();
-    if (on) this.flash("Focus mode: press Esc to exit");
+    if (on) {
+      if (this.active!.mode !== "read") this.view.focus();
+      this.showFocusBar(2500);
+    } else {
+      document.documentElement.classList.remove("focus-bar-shown");
+    }
+  }
+
+  private async toggleFullscreen(): Promise<void> {
+    try {
+      await this.win.setFullscreen(!(await this.win.isFullscreen()));
+    } catch (e) {
+      toast(String(e), "error");
+    }
+  }
+
+  private bindFocusBar(): void {
+    const bar = $("#focus-bar");
+    bar.addEventListener("click", (e) => {
+      const b = (e.target as Element).closest<HTMLElement>("button[data-focus]");
+      if (!b) return;
+      if (b.dataset.focus === "exit") return this.setFocusMode(false);
+      if (b.dataset.focus === "highlight") {
+        const order = ["sentence", "paragraph", "off"] as const;
+        settings.set("focusHighlight", order[(order.indexOf(settings.get("focusHighlight")) + 1) % order.length]);
+      } else {
+        settings.set("focusTypewriter", !settings.get("focusTypewriter"));
+      }
+      this.applyMode();
+      this.updateFocusBar();
+    });
+    // Buttons in the bar shouldn't take focus from the editor.
+    bar.addEventListener("mousedown", (e) => e.preventDefault());
+    let last = { x: -1, y: -1 };
+    window.addEventListener("pointermove", (e) => {
+      if (!this.focusMode) return;
+      if (Math.abs(e.clientX - last.x) + Math.abs(e.clientY - last.y) < 6) return;
+      last = { x: e.clientX, y: e.clientY };
+      this.showFocusBar(e.clientY > window.innerHeight - 120 ? 0 : 1600);
+    });
+    window.addEventListener("keydown", () => {
+      if (this.focusMode) this.hideFocusBar();
+    });
+  }
+
+  /** Shows the bar; it hides again after `ms` (0 = until the pointer leaves the bottom). */
+  private showFocusBar(ms: number): void {
+    document.documentElement.classList.add("focus-bar-shown");
+    clearTimeout(this.focusBarTimer);
+    if (ms) this.focusBarTimer = window.setTimeout(() => this.hideFocusBar(), ms);
+  }
+
+  private hideFocusBar(): void {
+    clearTimeout(this.focusBarTimer);
+    if ($("#focus-bar").matches(":hover")) return;
+    document.documentElement.classList.remove("focus-bar-shown");
+  }
+
+  private updateFocusBar(): void {
+    if (!this.focusMode) return;
+    const words = this.wordCount;
+    $("#focus-words").textContent = `${words.toLocaleString()} ${words === 1 ? "word" : "words"}`;
+    const writing = this.active?.mode !== "read";
+    const highlight = $("#focus-bar [data-focus=highlight]");
+    const typewriter = $("#focus-bar [data-focus=typewriter]");
+    highlight.hidden = typewriter.hidden = !writing;
+    const h = settings.get("focusHighlight");
+    highlight.querySelector("span")!.textContent = h === "sentence" ? "Sentence" : h === "paragraph" ? "Paragraph" : "Off";
+    highlight.setAttribute("aria-pressed", String(h !== "off"));
+    typewriter.setAttribute("aria-pressed", String(settings.get("focusTypewriter")));
   }
 
   // ---------------------------------------------------------------- export
@@ -1654,7 +1733,7 @@ export class App {
     $("#welcome-open").addEventListener("click", () => void this.openFileDialog());
     $("#welcome-new").addEventListener("click", () => this.newTab());
     $("#welcome-folder").addEventListener("click", () => void this.openFolderDialog());
-    $("#focus-exit").addEventListener("click", () => void this.setFocusMode(false));
+    this.bindFocusBar();
     document.addEventListener("contextmenu", (e) => this.onContextMenu(e));
     for (const b of this.tocEl.querySelectorAll<HTMLElement>(".sidebar-tabs button"))
       b.addEventListener("click", () => this.showPanel(b.dataset.panel as "files" | "search" | "outline", false));
@@ -1826,6 +1905,7 @@ export class App {
       p: "quick-open",
       "shift+p": "command-palette",
       "shift+f": "search-folder",
+      "shift+enter": "toggle-focus",
       "\\": "toggle-sidebar",
       pagedown: "next-tab",
       pageup: "prev-tab",
@@ -1851,9 +1931,9 @@ export class App {
           stop();
           return this.find.close();
         }
-        if (key === "f11") {
+        if (isMac ? e.metaKey && e.ctrlKey && key === "f" : key === "f11") {
           stop();
-          return this.runCommand("toggle-focus", "key");
+          return this.runCommand("toggle-fullscreen", "key");
         }
         if (
           key === "escape" &&

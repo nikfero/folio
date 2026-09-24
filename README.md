@@ -19,7 +19,8 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 - **Clickable checkboxes** that update (and save) the source file
 - **Editing helpers**: shortcuts for bold, italic, inline code, strikethrough and links; paste a URL over text to link it; paste or drop an image to save it into `images/` next to the document; align table columns
 - **Export** a standalone HTML file, or **Print / Save as PDF**. Export options: table of contents (top or sidebar), light / dark / follow-the-reader theme, font, text width, metadata, extra CSS; images and math fonts are embedded so the file works offline
-- **Focus mode** (<kbd>F11</kbd>): full screen with only the text, dimming every paragraph but the current one
+- **Focus mode** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>): only the text in a calm centered column; the current sentence or paragraph stays bright, typewriter scrolling keeps your line mid-screen, and a small bar appears when you move the mouse
+- **Full screen**: <kbd>F11</kbd> (<kbd>⌃</kbd>+<kbd>⌘</kbd>+<kbd>F</kbd> on macOS)
 - **Jump to source**: <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+click in the preview (or double-click in Split) moves the editor to that line
 - **Math** (KaTeX) and **Mermaid** diagrams, loaded only when a document uses them
 - YAML frontmatter shown as a tidy metadata table
@@ -51,7 +52,8 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 | Show outline | Ctrl+Shift+O | ⌘⇧O |
 | Find | Ctrl+F | ⌘F |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | ⌘= / ⌘- / ⌘0 |
-| Focus mode | F11 (Esc exits) | F11 (Esc exits) |
+| Focus mode | Ctrl+Shift+Enter (Esc exits) | ⌘⇧Enter (Esc exits) |
+| Full screen | F11 | ⌃⌘F |
 | Settings | Ctrl+, | ⌘, |
 
 In the editor:

@@ -61,7 +61,22 @@ function sections(opts: { menuBar: boolean }): Section[] {
         },
         { key: "lineNumbers", label: "Line numbers" },
         { key: "wrapLines", label: "Wrap long lines" },
-        { key: "focusDim", label: "Dim other paragraphs in focus mode", hint: "Focus mode (F11) hides everything but the text" },
+      ],
+    },
+    {
+      title: "Focus mode",
+      rows: [
+        {
+          key: "focusHighlight",
+          label: "Keep bright",
+          hint: "The rest of the text fades while you write",
+          options: [
+            ["sentence", "Current sentence"],
+            ["paragraph", "Current paragraph"],
+            ["off", "Everything"],
+          ],
+        },
+        { key: "focusTypewriter", label: "Typewriter scrolling", hint: "Keep the line you're writing in the middle of the screen" },
       ],
     },
     {

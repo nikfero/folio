@@ -2,6 +2,7 @@
 
 import type { Mode } from "./app";
 import type { ExportOptions } from "./export-options";
+import type { FocusHighlight } from "./focus";
 
 export interface Settings {
   theme: "system" | "light" | "dark";
@@ -22,7 +23,8 @@ export interface Settings {
   previewFont: "sans" | "serif";
   previewWidth: "narrow" | "medium" | "wide" | "full";
   exportOptions: Partial<ExportOptions>;
-  focusDim: boolean;
+  focusHighlight: FocusHighlight;
+  focusTypewriter: boolean;
 }
 
 const defaults: Settings = {
@@ -43,7 +45,8 @@ const defaults: Settings = {
   previewFont: "sans",
   previewWidth: "medium",
   exportOptions: {},
-  focusDim: true,
+  focusHighlight: "sentence",
+  focusTypewriter: true,
 };
 
 const PREFIX = "folio.";
