@@ -4,20 +4,26 @@ export interface MenuItem {
   label: string;
   shortcut?: string;
   disabled?: boolean;
-  action: () => void;
+  action?: () => void;
+  /** Entries of a submenu, opened on hover, click or the right arrow key. */
+  submenu?: MenuEntry[];
 }
 export type MenuEntry = MenuItem | "separator";
 
-let openMenu: HTMLElement | null = null;
+/** Open menus, the root first and then any submenus. */
+let openMenus: HTMLElement[] = [];
 
 export function closeMenu(): void {
-  openMenu?.remove();
-  openMenu = null;
+  for (const m of openMenus) m.remove();
+  openMenus = [];
 }
 
-/** Shows a menu at viewport point (x, y), kept inside the window. */
-export function showMenu(x: number, y: number, entries: MenuEntry[]): void {
-  closeMenu();
+/** Closes the submenus deeper than `level` (0 = the root menu). */
+function closeSubmenus(level: number): void {
+  for (const m of openMenus.splice(level + 1)) m.remove();
+}
+
+function buildMenu(entries: MenuEntry[], level: number): HTMLElement {
   const menu = document.createElement("div");
   menu.className = "menu";
   menu.setAttribute("role", "menu");
@@ -27,40 +33,85 @@ export function showMenu(x: number, y: number, entries: MenuEntry[]): void {
       continue;
     }
     const item = document.createElement("button");
-    item.className = "menu-item";
+    item.className = entry.submenu ? "menu-item has-submenu" : "menu-item";
     item.setAttribute("role", "menuitem");
     item.disabled = !!entry.disabled;
     item.innerHTML = `<span></span><kbd></kbd>`;
     item.children[0].textContent = entry.label;
-    item.children[1].textContent = entry.shortcut ?? "";
-    item.addEventListener("click", () => {
-      closeMenu();
-      entry.action();
-    });
+    item.children[1].textContent = entry.submenu ? "›" : (entry.shortcut ?? "");
+    if (entry.submenu) {
+      item.setAttribute("aria-haspopup", "menu");
+      const open = () => {
+        if (openMenus[level + 1]?.dataset.parent === entry.label) return;
+        closeSubmenus(level);
+        const sub = buildMenu(entry.submenu!, level + 1);
+        sub.dataset.parent = entry.label;
+        place(sub, item.getBoundingClientRect());
+      };
+      item.addEventListener("mouseenter", open);
+      item.addEventListener("click", open);
+    } else {
+      item.addEventListener("mouseenter", () => closeSubmenus(level));
+      item.addEventListener("click", () => {
+        closeMenu();
+        entry.action?.();
+      });
+    }
     menu.appendChild(item);
   }
+  return menu;
+}
+
+/** Adds a submenu beside its item, flipping to the left when there's no room on the right. */
+function place(menu: HTMLElement, beside: DOMRect): void {
+  document.body.appendChild(menu);
+  openMenus.push(menu);
+  const r = menu.getBoundingClientRect();
+  const x = beside.right + r.width + 4 <= innerWidth ? beside.right + 2 : beside.left - r.width - 2;
+  menu.style.left = `${Math.max(4, x)}px`;
+  menu.style.top = `${Math.max(4, Math.min(beside.top - 5, innerHeight - r.height - 4))}px`;
+}
+
+/** Shows a menu at viewport point (x, y), kept inside the window. */
+export function showMenu(x: number, y: number, entries: MenuEntry[]): void {
+  closeMenu();
+  const menu = buildMenu(entries, 0);
   document.body.appendChild(menu);
   const r = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(4, Math.min(x, innerWidth - r.width - 4))}px`;
   menu.style.top = `${Math.max(4, Math.min(y, innerHeight - r.height - 4))}px`;
-  openMenu = menu;
+  openMenus = [menu];
   (menu.querySelector("button:not(:disabled)") as HTMLElement | null)?.focus();
 }
 
 document.addEventListener(
   "pointerdown",
   (e) => {
-    if (openMenu && !openMenu.contains(e.target as Node)) closeMenu();
+    if (openMenus.length && !openMenus.some((m) => m.contains(e.target as Node))) closeMenu();
   },
   true,
 );
 document.addEventListener("keydown", (e) => {
-  if (!openMenu) return;
-  const items = [...openMenu.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
-  const i = items.indexOf(document.activeElement as HTMLButtonElement);
-  if (e.key === "Escape") closeMenu();
-  else if (e.key === "ArrowDown") items[(i + 1) % items.length]?.focus();
+  if (!openMenus.length) return;
+  const current = openMenus.find((m) => m.contains(document.activeElement)) ?? openMenus[openMenus.length - 1];
+  const level = openMenus.indexOf(current);
+  const items = [...current.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+  const focused = document.activeElement as HTMLButtonElement;
+  const i = items.indexOf(focused);
+  const backToParent = () => {
+    const parent = openMenus[level].dataset.parent;
+    closeSubmenus(level - 1);
+    [...openMenus[level - 1].querySelectorAll<HTMLElement>(".has-submenu")].find((b) => b.firstElementChild?.textContent === parent)?.focus();
+  };
+  if (e.key === "Escape") {
+    if (level > 0) backToParent();
+    else closeMenu();
+  } else if (e.key === "ArrowDown") items[(i + 1) % items.length]?.focus();
   else if (e.key === "ArrowUp") items[(i - 1 + items.length) % items.length]?.focus();
+  else if (e.key === "ArrowRight" && focused?.classList.contains("has-submenu")) {
+    focused.click();
+    openMenus[level + 1]?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+  } else if (e.key === "ArrowLeft" && level > 0) backToParent();
   else return;
   e.preventDefault();
   e.stopPropagation();

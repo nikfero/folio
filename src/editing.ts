@@ -1,6 +1,6 @@
-// Markdown editing commands: inline formatting, links, and table formatting.
+// Markdown editing commands: inline formatting, links, and tables.
 
-import { EditorSelection, type ChangeSpec, type EditorState } from "@codemirror/state";
+import { EditorSelection, type EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
 /**
@@ -125,53 +125,221 @@ export function tableAt(state: EditorState, pos: number): { from: number; to: nu
   return { from: start, to: end };
 }
 
-/** Aligns the columns of the Markdown table under the cursor. */
-export function formatTable(view: EditorView): boolean {
-  const { state } = view;
-  const table = tableAt(state, state.selection.main.head);
-  if (!table) return false;
+type Align = "" | "l" | "c" | "r";
+
+interface Table {
+  /** First and last line numbers. */
+  from: number;
+  to: number;
+  indent: string;
+  /** Header row first, then the body rows (the delimiter row is `align`). */
+  rows: string[][];
+  align: Align[];
+}
+
+/** The table under `pos`, and the cursor's cell in it (row 0 is the header; the delimiter row counts as the header). */
+function readTable(state: EditorState, pos: number): { table: Table; row: number; col: number; offset: number } | null {
+  const range = tableAt(state, pos);
+  if (!range) return null;
   const doc = state.doc;
   const lines: string[] = [];
-  for (let n = table.from; n <= table.to; n++) lines.push(doc.line(n).text);
-  const indent = /^\s*/.exec(lines[0])![0];
-  const rows = lines.map(splitRow);
-  const cols = Math.max(...rows.map((r) => r.length));
-  const align = rows[1].map((c) => (c.startsWith(":") && c.endsWith(":") ? "c" : c.endsWith(":") ? "r" : c.startsWith(":") ? "l" : ""));
-  const widths = Array.from({ length: cols }, (_, i) =>
-    Math.max(3, ...rows.map((r, ri) => (ri === 1 ? 0 : width(r[i] ?? "")))),
-  );
-  const pad = (s: string, w: number, a: string) => {
+  for (let n = range.from; n <= range.to; n++) lines.push(doc.line(n).text);
+  const parsed = lines.map(splitRow);
+  const cols = Math.max(...parsed.map((r) => r.length));
+  const align = Array.from({ length: cols }, (_, i): Align => {
+    const c = parsed[1][i] ?? "";
+    return c.startsWith(":") && c.endsWith(":") ? "c" : c.endsWith(":") ? "r" : c.startsWith(":") ? "l" : "";
+  });
+  const rows = [parsed[0], ...parsed.slice(2)].map((r) => Array.from({ length: cols }, (_, i) => r[i] ?? ""));
+  const line = doc.lineAt(pos);
+  const index = line.number - range.from;
+  const cell = cellAt(line.text, pos - line.from);
+  return {
+    table: { from: range.from, to: range.to, indent: /^\s*/.exec(lines[0])![0], rows, align },
+    row: index <= 1 ? 0 : index - 1,
+    col: Math.min(cell.index, cols - 1),
+    offset: cell.offset,
+  };
+}
+
+/** Which cell of a table row `offset` falls in, and how far into the cell's text. */
+function cellAt(line: string, offset: number): { index: number; offset: number } {
+  let index = 0;
+  let cellStart = 0;
+  let inCode = false;
+  const lead = line.length - line.trimStart().length;
+  const leadingPipe = line[lead] === "|";
+  for (let i = 0; i < offset && i < line.length; i++) {
+    const ch = line[i];
+    if (ch === "\\" && line[i + 1] === "|") i++;
+    else if (ch === "`") inCode = !inCode;
+    else if (ch === "|" && !inCode) {
+      if (!(leadingPipe && i === lead)) index++;
+      cellStart = i + 1;
+    }
+  }
+  const text = line.slice(cellStart, offset);
+  return { index, offset: text.trimStart().length };
+}
+
+/** Writes `table` back, columns aligned, with the cursor in cell (`row`, `col`). */
+function writeTable(view: EditorView, table: Table, row: number, col: number, offset = 0): void {
+  const { rows, align, indent } = table;
+  const cols = align.length;
+  const widths = Array.from({ length: cols }, (_, i) => Math.max(3, ...rows.map((r) => width(r[i] ?? ""))));
+  const pad = (s: string, w: number, a: Align) => {
     const gap = w - width(s);
     if (a === "r") return " ".repeat(gap) + s;
     if (a === "c") return " ".repeat(Math.floor(gap / 2)) + s + " ".repeat(Math.ceil(gap / 2));
     return s + " ".repeat(gap);
   };
-  const out = rows.map((r, ri) => {
-    const cells = Array.from({ length: cols }, (_, i) => {
-      if (ri === 1) {
-        const a = align[i] ?? "";
-        const dashes = "-".repeat(widths[i] - (a === "c" ? 2 : a ? 1 : 0));
-        return a === "c" ? `:${dashes}:` : a === "r" ? `${dashes}:` : a === "l" ? `:${dashes}` : dashes;
-      }
-      return pad(r[i] ?? "", widths[i], align[i] ?? "");
-    });
-    return `${indent}| ${cells.join(" | ")} |`;
+  const line = (cells: string[]) => `${indent}| ${cells.join(" | ")} |`;
+  const delimiter = align.map((a, i) => {
+    const dashes = "-".repeat(widths[i] - (a === "c" ? 2 : a ? 1 : 0));
+    return a === "c" ? `:${dashes}:` : a === "r" ? `${dashes}:` : a === "l" ? `:${dashes}` : dashes;
   });
+  const out = [line(rows[0].map((c, i) => pad(c, widths[i], align[i]))), line(delimiter)];
+  for (const r of rows.slice(1)) out.push(line(r.map((c, i) => pad(c, widths[i], align[i]))));
+
+  const doc = view.state.doc;
   const from = doc.line(table.from).from;
   const to = doc.line(table.to).to;
   const insert = out.join("\n");
-  if (insert === doc.sliceString(from, to)) return true;
-  // Keep the cursor on the same row, as close to its column as the new layout allows.
-  const head = doc.lineAt(state.selection.main.head);
-  const col = state.selection.main.head - head.from;
-  const changes: ChangeSpec = { from, to, insert };
-  const rowStart = from + out.slice(0, head.number - table.from).reduce((n, l) => n + l.length + 1, 0);
-  const rowLength = out[head.number - table.from].length;
+  // Cursor: start of the cell's text (after right / centre padding), plus `offset`.
+  const r = Math.max(0, Math.min(row, rows.length - 1));
+  const c = Math.max(0, Math.min(col, cols - 1));
+  const lineIndex = r === 0 ? 0 : r + 1;
+  const lineStart = from + out.slice(0, lineIndex).reduce((n, l) => n + l.length + 1, 0);
+  const cellStart = indent.length + 2 + widths.slice(0, c).reduce((n, w) => n + w + 3, 0);
+  const text = rows[r][c] ?? "";
+  const padBefore = pad(text, widths[c], align[c]).length - pad(text, widths[c], align[c]).trimStart().length;
+  const anchor = lineStart + cellStart + (text ? padBefore : 0) + Math.min(offset, text.length);
   view.dispatch({
-    changes,
-    selection: { anchor: rowStart + Math.min(col, rowLength) },
+    changes: insert === doc.sliceString(from, to) ? undefined : { from, to, insert },
+    selection: { anchor },
     userEvent: "input.format",
     scrollIntoView: true,
   });
+  view.focus();
+}
+
+/** Aligns the columns of the Markdown table under the cursor. */
+export function formatTable(view: EditorView): boolean {
+  const t = readTable(view.state, view.state.selection.main.head);
+  if (!t) return false;
+  writeTable(view, t.table, t.row, t.col, t.offset);
+  return true;
+}
+
+export type TableAction =
+  | "row-above"
+  | "row-below"
+  | "row-delete"
+  | "row-up"
+  | "row-down"
+  | "col-left"
+  | "col-right"
+  | "col-delete"
+  | "col-move-left"
+  | "col-move-right"
+  | "align-left"
+  | "align-center"
+  | "align-right"
+  | "align-none";
+
+/** Which table actions make sense at the cursor (e.g. the header row can't be deleted). */
+export function tableActions(state: EditorState, pos: number): Set<TableAction> | null {
+  const t = readTable(state, pos);
+  if (!t) return null;
+  const { rows, align } = t.table;
+  const ok = new Set<TableAction>(["row-below", "col-left", "col-right", "align-left", "align-center", "align-right", "align-none"]);
+  if (t.row > 0) ok.add("row-above").add("row-delete");
+  if (t.row > 1) ok.add("row-up");
+  if (t.row > 0 && t.row < rows.length - 1) ok.add("row-down");
+  if (align.length > 1) ok.add("col-delete");
+  if (t.col > 0) ok.add("col-move-left");
+  if (t.col < align.length - 1) ok.add("col-move-right");
+  return ok;
+}
+
+/** Edits the table under the cursor: adds, removes or moves rows and columns, or sets a column's alignment. */
+export function editTable(view: EditorView, action: TableAction): boolean {
+  const t = readTable(view.state, view.state.selection.main.head);
+  if (!t || !tableActions(view.state, view.state.selection.main.head)?.has(action)) return false;
+  const { table } = t;
+  let { row, col } = t;
+  const rows = table.rows;
+  const cols = table.align.length;
+  const swap = <T>(list: T[], a: number, b: number) => ([list[a], list[b]] = [list[b], list[a]]);
+  switch (action) {
+    case "row-above":
+      rows.splice(row, 0, Array(cols).fill(""));
+      break;
+    case "row-below":
+      rows.splice(row + 1, 0, Array(cols).fill(""));
+      row++;
+      break;
+    case "row-delete":
+      rows.splice(row, 1);
+      row = Math.min(row, rows.length - 1);
+      break;
+    case "row-up":
+      swap(rows, row, row - 1);
+      row--;
+      break;
+    case "row-down":
+      swap(rows, row, row + 1);
+      row++;
+      break;
+    case "col-left":
+    case "col-right": {
+      const at = action === "col-left" ? col : col + 1;
+      for (const r of rows) r.splice(at, 0, "");
+      table.align.splice(at, 0, "");
+      col = at;
+      break;
+    }
+    case "col-delete":
+      for (const r of rows) r.splice(col, 1);
+      table.align.splice(col, 1);
+      col = Math.min(col, cols - 2);
+      break;
+    case "col-move-left":
+    case "col-move-right": {
+      const to = action === "col-move-left" ? col - 1 : col + 1;
+      for (const r of rows) swap(r, col, to);
+      swap(table.align, col, to);
+      col = to;
+      break;
+    }
+    default:
+      table.align[col] = ({ "align-left": "l", "align-center": "c", "align-right": "r", "align-none": "" } as const)[action];
+  }
+  writeTable(view, table, row, col);
+  return true;
+}
+
+/** Inserts an empty table (a header and two rows, three columns) at the cursor, on its own lines. */
+export function insertTable(view: EditorView): boolean {
+  const { state } = view;
+  const pos = state.selection.main.head;
+  const line = state.doc.lineAt(pos);
+  const before = line.text.trim() ? (pos === line.from ? "" : "\n\n") : "";
+  const after = line.text.slice(pos - line.from).trim() ? "\n\n" : "\n";
+  const table = [
+    "| Column 1 | Column 2 | Column 3 |",
+    "| -------- | -------- | -------- |",
+    "|          |          |          |",
+    "|          |          |          |",
+  ].join("\n");
+  const insert = before + table + after;
+  const header = pos + before.length + 2;
+  view.dispatch({
+    changes: { from: pos, insert },
+    selection: { anchor: header, head: header + "Column 1".length },
+    userEvent: "input.format",
+    scrollIntoView: true,
+  });
+  view.focus();
   return true;
 }

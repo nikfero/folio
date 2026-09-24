@@ -21,7 +21,15 @@ import {
   setLive,
 } from "./editor";
 import { isPaletteOpen } from "./palette";
-import { formatTable, insertLink, tableAt, toggleInline } from "./editing";
+import {
+  editTable,
+  formatTable,
+  insertLink,
+  insertTable,
+  tableActions,
+  toggleInline,
+  type TableAction,
+} from "./editing";
 import { Preview } from "./preview";
 import { ScrollMap, editorTopLine, revealLine, scrollEditorToLine } from "./scrollsync";
 import { FindBar } from "./find";
@@ -94,6 +102,23 @@ const mod = isMac ? "⌘" : "Ctrl+";
 /** Formats a shortcut like "Shift+P" for the current OS ("⌘⇧P" or "Ctrl+Shift+P"). */
 const keys = (combo: string) => (isMac ? `⌘${combo.replace("Shift+", "⇧")}` : `Ctrl+${combo}`);
 const FULLSCREEN_KEY = isMac ? "⌃⌘F" : "F11";
+/** Table editing actions, their menu labels and menu groups. */
+const TABLE_ACTIONS: [TableAction, string, string][] = [
+  ["row-above", "Insert Row Above", "row"],
+  ["row-below", "Insert Row Below", "row"],
+  ["row-up", "Move Row Up", "row"],
+  ["row-down", "Move Row Down", "row"],
+  ["row-delete", "Delete Row", "row"],
+  ["col-left", "Insert Column Left", "col"],
+  ["col-right", "Insert Column Right", "col"],
+  ["col-move-left", "Move Column Left", "col"],
+  ["col-move-right", "Move Column Right", "col"],
+  ["col-delete", "Delete Column", "col"],
+  ["align-left", "Align Column Left", "align"],
+  ["align-center", "Align Column Center", "align"],
+  ["align-right", "Align Column Right", "align"],
+  ["align-none", "Clear Column Alignment", "align"],
+];
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const SERIF = 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif';
 const WIDTHS = { narrow: "680px", medium: "820px", wide: "1040px", full: "none" } as const;
@@ -210,6 +235,16 @@ export class App {
       this.format((v) => {
         if (!formatTable(v)) toast("Put the cursor inside a Markdown table to format it.");
       }),
+    "insert-table": () => this.format((v) => insertTable(v)),
+    ...Object.fromEntries(
+      TABLE_ACTIONS.map(([action]) => [
+        `table-${action}`,
+        () =>
+          this.format((v) => {
+            if (!editTable(v, action)) toast("Put the cursor inside a Markdown table first.");
+          }),
+      ]),
+    ),
   };
   private lastCommand = { id: "", source: "", time: 0 };
 
@@ -715,6 +750,8 @@ export class App {
       ["format-strike", "Format: Strikethrough", keys("Shift+X")],
       ["format-link", "Format: Link", keys("K")],
       ["format-table", "Format: Align Table Columns", isMac ? "⌥⇧F" : "Shift+Alt+F"],
+      ["insert-table", "Table: Insert Table"],
+      ...TABLE_ACTIONS.map(([action, label]): [string, string] => [`table-${action}`, `Table: ${label}`]),
       ["mode-read", "View: Read"],
       ["mode-live", "View: Live Preview"],
       ["mode-split", "View: Split"],
@@ -1705,14 +1742,24 @@ export class App {
       shortcut,
       action: () => this.runCommand(id, "ui"),
     });
-    const inTable = tableAt(view.state, range.head) !== null;
+    const table = tableActions(view.state, range.head);
+    const tableMenu: MenuEntry[] = [];
+    if (table) {
+      let group = "";
+      for (const [action, label, section] of TABLE_ACTIONS) {
+        if (group && section !== group) tableMenu.push("separator");
+        group = section;
+        tableMenu.push({ label, disabled: !table.has(action), action: () => this.runCommand(`table-${action}`, "ui") });
+      }
+      tableMenu.push("separator", fmt("Align Columns", "format-table", isMac ? "⌥⇧F" : "Shift+Alt+F"));
+    }
     return [
       fmt("Bold", "format-bold", keys("B")),
       fmt("Italic", "format-italic", keys("I")),
       fmt("Code", "format-code", keys("`")),
       fmt("Strikethrough", "format-strike", keys("Shift+X")),
       fmt("Link", "format-link", keys("K")),
-      ...(inTable ? [fmt("Format Table", "format-table", isMac ? "⌥⇧F" : "Shift+Alt+F")] : []),
+      table ? { label: "Table", submenu: tableMenu } : fmt("Insert Table", "insert-table"),
       "separator",
       { label: "Undo", shortcut: keys("Z"), disabled: !undoDepth(view.state), action: () => undo(view) },
       { label: "Redo", shortcut: isMac ? "⌘⇧Z" : "Ctrl+Y", disabled: !redoDepth(view.state), action: () => redo(view) },
