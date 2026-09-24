@@ -388,8 +388,33 @@ fn create_window(app: &AppHandle, label: &str) -> tauri::Result<()> {
     if wants_menu(app) {
         builder = builder.menu(build_menu(app)?);
     }
-    builder.build()?;
+    let window = builder.build()?;
+    disable_browser_keys(&window);
     Ok(())
+}
+
+/// Folio is an app, not a browser: WebView2's own shortcuts (developer tools,
+/// find on page, reload, print, back/forward) are switched off. The page still
+/// receives the keys, so Folio's shortcuts keep working. macOS and Linux
+/// webviews have no such shortcuts. Set FOLIO_DEVTOOLS=1 in a debug build to
+/// keep them (F12 opens the developer tools).
+fn disable_browser_keys(window: &WebviewWindow) {
+    if cfg!(debug_assertions) && std::env::var_os("FOLIO_DEVTOOLS").is_some() {
+        return;
+    }
+    #[cfg(windows)]
+    let _ = window.with_webview(|webview| unsafe {
+        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+        use windows::core::Interface;
+        let Ok(settings) = webview.controller().CoreWebView2().and_then(|core| core.Settings()) else {
+            return;
+        };
+        if let Ok(settings) = settings.cast::<ICoreWebView2Settings3>() {
+            let _ = settings.SetAreBrowserAcceleratorKeysEnabled(false);
+        }
+    });
+    #[cfg(not(windows))]
+    let _ = window;
 }
 
 /// Delivers documents to a window: directly if its frontend is ready,

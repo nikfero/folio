@@ -1107,6 +1107,8 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
  "trash",
+ "webview2-com",
+ "windows 0.61.3",
 ]
 
 [[package]]

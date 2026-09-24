@@ -30,6 +30,12 @@ base64 = "0.22"
 trash = "5"
 regex = "1"
 
+# Only to switch off WebView2's browser shortcuts (F12, Ctrl+F, F5, Alt+Left…),
+# which Tauri doesn't expose; same versions Tauri already uses.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = "0.61"
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
