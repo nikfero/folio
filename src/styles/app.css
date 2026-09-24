@@ -419,6 +419,26 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.tree-folder > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-close {
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+.tree-folder:hover .tree-close,
+.tree-close:focus-visible {
+  opacity: 1;
+}
+.tree-folder .tree-close svg {
+  width: 12px;
+  height: 12px;
+  color: inherit;
+}
 .tree-folder svg {
   flex: none;
   width: 14px;

@@ -36,11 +36,12 @@ export class FileTree {
 
   constructor(
     private el: HTMLElement,
-    private handlers: { open(path: string): void; openFolder(): void },
+    private handlers: { open(path: string): void; openFolder(): void; closeFolder(): void },
   ) {
     el.addEventListener("click", (e) => {
       const target = e.target as Element;
       if (target.closest("[data-open-folder]")) return this.handlers.openFolder();
+      if (target.closest("[data-close-folder]")) return this.handlers.closeFolder();
       const row = target.closest<HTMLElement>(".tree-row");
       if (!row) return;
       if (row.dataset.dir !== undefined) {
@@ -102,7 +103,7 @@ export class FileTree {
       this.el.innerHTML = `<div class="tree-empty"><p>No folder open.</p><button class="btn small" data-open-folder>Open Folder…</button></div>`;
       return;
     }
-    const head = `<div class="tree-folder" title="${escapeAttr(this.root)}">${icons.folder}<span>${escapeText(basename(this.root))}</span></div>`;
+    const head = `<div class="tree-folder" title="${escapeAttr(this.root)}">${icons.folder}<span>${escapeText(basename(this.root))}</span><button class="icon-btn tree-close" data-close-folder title="Close Folder" aria-label="Close Folder">${icons.close}</button></div>`;
     if (!this.files.length) {
       this.el.innerHTML = `${head}<p class="tree-note">No Markdown files in this folder.</p>`;
       return;

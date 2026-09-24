@@ -71,6 +71,8 @@ const files = new Map<string, { text: string; mtime: number }>([
   ["C:\\docs\\guide.md", { text: "# Guide\n\n## Usage\n\nOpen a file with **Ctrl+O**.\n\n[Back to README](README.md)\n", mtime: 1 }],
 ]);
 
+let clipboard = "";
+
 export function installMock(): void {
   mockWindows("main");
   mockConvertFileSrc("windows");
@@ -102,6 +104,11 @@ export function installMock(): void {
             .map((p) => ({ path: p, rel: p.slice(root.length).replace(/\\/g, "/") }));
           return { files: entries, truncated: false };
         }
+        case "plugin:clipboard-manager|write_text":
+          clipboard = String((args as { text?: string }).text ?? "");
+          return null;
+        case "plugin:clipboard-manager|read_text":
+          return clipboard;
         case "plugin:dialog|save":
           return "C:\\docs\\new-file.md";
         case "plugin:opener|open_url":

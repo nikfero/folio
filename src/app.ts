@@ -1,6 +1,7 @@
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { EditorState, Text } from "@codemirror/state";
 import { openSearchPanel } from "@codemirror/search";
+import { redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion } from "@tauri-apps/api/app";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -28,6 +29,8 @@ import {
   listFolder,
   newWindow,
   pathKey,
+  readClipboard,
+  writeClipboard,
   readText,
   menuVisible,
   resolvePath,
@@ -67,6 +70,17 @@ const MD_FILTERS = [
   { name: "All files", extensions: ["*"] },
 ];
 
+/** Drops separators at the start, the end, and next to each other. */
+function tidyMenu(entries: MenuEntry[]): MenuEntry[] {
+  const out: MenuEntry[] = [];
+  for (const e of entries) {
+    if (e === "separator" && (!out.length || out[out.length - 1] === "separator")) continue;
+    out.push(e);
+  }
+  if (out[out.length - 1] === "separator") out.pop();
+  return out;
+}
+
 export class App {
   private tabs: Tab[] = [];
   private active: Tab | null = null;
@@ -87,6 +101,7 @@ export class App {
   private fileTree = new FileTree($("#files-panel"), {
     open: (path) => void this.openPath(path),
     openFolder: () => void this.openFolderDialog(),
+    closeFolder: () => this.setFolder(null),
   });
   private banner = $("#banner");
   private welcome = $("#welcome");
@@ -283,6 +298,9 @@ export class App {
       else if (!next) {
         this.view.setState(makeState(""));
         this.preview.clear();
+        this.wordCount = 0;
+        this.buildToc();
+        if (this.find.isOpen) this.find.close();
       }
     }
     this.refreshUi();
@@ -780,6 +798,10 @@ export class App {
   private buildToc(): void {
     this.tocList.innerHTML = "";
     this.tocHeadings = [];
+    if (!this.active) {
+      this.tocList.innerHTML = `<p class="toc-empty">No document open</p>`;
+      return;
+    }
     const headings = this.preview.headings();
     if (!headings.length) {
       this.tocList.innerHTML = `<p class="toc-empty">No headings</p>`;
@@ -1021,6 +1043,7 @@ export class App {
       item("New Tab", "new-tab", keys("T")),
       item("Open File…", "open", keys("O")),
       item("Open Folder…", "open-folder", keys("Shift+F")),
+      item("Close Folder", "close-folder", undefined, !this.fileTree.folder),
       item("Go to File…", "quick-open", keys("P")),
       item("Save", "save", keys("S"), !tab),
       item("Save As…", "save-as", keys("Shift+S"), !tab),
@@ -1062,13 +1085,144 @@ export class App {
       {
         label: "Copy Path",
         disabled: !tab.path,
-        action: () => tab.path && void navigator.clipboard.writeText(tab.path),
+        action: () => tab.path && void writeClipboard(tab.path),
       },
       {
         label: "Reveal in Folder",
         disabled: !tab.path,
         action: () => tab.path && void revealItemInDir(tab.path).catch((e) => toast(String(e), "error")),
       },
+    ];
+  }
+
+  // ---------------------------------------------------------- context menus
+
+  /** Replaces the webview's browser menu with Folio's own everywhere except plain text fields. */
+  private onContextMenu(e: MouseEvent): void {
+    if (e.defaultPrevented) return; // tabs have their own menu
+    const target = e.target as Element;
+    if (target.closest("input, textarea, select")) return;
+    e.preventDefault();
+    let entries: MenuEntry[] = [];
+    if (this.view.dom.contains(target)) entries = this.editorMenu(e);
+    else if (this.previewPane.contains(target)) entries = this.previewMenu(target);
+    else if (target.closest("#files-panel")) entries = this.treeMenu(target);
+    entries = tidyMenu(entries);
+    if (entries.length) showMenu(e.clientX, e.clientY, entries);
+  }
+
+  private editorMenu(e: MouseEvent): MenuEntry[] {
+    const view = this.view;
+    // Like a text field: right-clicking outside the selection moves the cursor there first.
+    const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+    const sel = view.state.selection.main;
+    if (pos != null && (sel.empty || pos < sel.from || pos > sel.to)) view.dispatch({ selection: { anchor: pos } });
+    view.focus();
+    const range = view.state.selection.main;
+    const text = view.state.sliceDoc(range.from, range.to);
+    return [
+      { label: "Undo", shortcut: keys("Z"), disabled: !undoDepth(view.state), action: () => undo(view) },
+      { label: "Redo", shortcut: isMac ? "⌘⇧Z" : "Ctrl+Y", disabled: !redoDepth(view.state), action: () => redo(view) },
+      "separator",
+      {
+        label: "Cut",
+        shortcut: keys("X"),
+        disabled: !text,
+        action: () => {
+          void writeClipboard(text);
+          view.dispatch(view.state.replaceSelection(""), { userEvent: "delete.cut" });
+          view.focus();
+        },
+      },
+      { label: "Copy", shortcut: keys("C"), disabled: !text, action: () => void writeClipboard(text) },
+      {
+        label: "Paste",
+        shortcut: keys("V"),
+        action: () =>
+          void readClipboard().then((clip) => {
+            if (clip) view.dispatch(view.state.replaceSelection(clip), { userEvent: "input.paste" });
+            view.focus();
+          }),
+      },
+      "separator",
+      {
+        label: "Select All",
+        shortcut: keys("A"),
+        action: () => {
+          selectAll(view);
+          view.focus();
+        },
+      },
+    ];
+  }
+
+  private previewMenu(target: Element): MenuEntry[] {
+    const selected = window.getSelection()?.toString() ?? "";
+    const link = target.closest("a[href]");
+    const code = target.closest("pre")?.querySelector("code");
+    const line = this.preview.lineAt(target);
+    const entries: MenuEntry[] = [];
+    if (link) {
+      const href = link.getAttribute("href")!;
+      entries.push(
+        {
+          label: "Open Link",
+          action: () =>
+            href.startsWith("#") ? this.preview.scrollToId(decodeURIComponent(href.slice(1))) : void this.followLink(href),
+        },
+        { label: "Copy Link Address", action: () => void writeClipboard(href) },
+        "separator",
+      );
+    }
+    entries.push({ label: "Copy", shortcut: keys("C"), disabled: !selected, action: () => void writeClipboard(selected) });
+    if (code) entries.push({ label: "Copy Code Block", action: () => void writeClipboard(code.textContent ?? "") });
+    entries.push(
+      {
+        label: "Select All",
+        shortcut: keys("A"),
+        action: () => {
+          const range = document.createRange();
+          range.selectNodeContents(this.preview.body);
+          const s = window.getSelection();
+          s?.removeAllRanges();
+          s?.addRange(range);
+        },
+      },
+      "separator",
+      { label: "Find…", shortcut: keys("F"), disabled: !this.active, action: () => this.find.open() },
+    );
+    if (line != null && this.active)
+      entries.push({
+        label: "Edit Source Here",
+        shortcut: isMac ? "⌘Click" : "Ctrl+Click",
+        action: () => this.jumpToSource(line, "modclick"),
+      });
+    return entries;
+  }
+
+  private treeMenu(target: Element): MenuEntry[] {
+    const reveal = (path: string) => void revealItemInDir(path).catch((e) => toast(String(e), "error"));
+    const path = target.closest<HTMLElement>(".tree-row.file")?.dataset.path;
+    if (path)
+      return [
+        { label: "Open", action: () => void this.openPath(path) },
+        {
+          label: "Open in New Window",
+          action: () => void newWindow([{ path, content: null }]).catch((e) => toast(String(e), "error")),
+        },
+        "separator",
+        { label: "Copy Path", action: () => void writeClipboard(path) },
+        { label: "Reveal in Folder", action: () => reveal(path) },
+      ];
+    const folder = this.fileTree.folder;
+    if (!folder) return [{ label: "Open Folder…", shortcut: keys("Shift+F"), action: () => void this.openFolderDialog() }];
+    return [
+      { label: "Refresh", action: () => void this.refreshFolder() },
+      { label: "Copy Folder Path", action: () => void writeClipboard(folder) },
+      { label: "Reveal in File Manager", action: () => reveal(folder) },
+      "separator",
+      { label: "Open Another Folder…", shortcut: keys("Shift+F"), action: () => void this.openFolderDialog() },
+      { label: "Close Folder", action: () => this.setFolder(null) },
     ];
   }
 
@@ -1105,6 +1259,7 @@ export class App {
     $("#welcome-open").addEventListener("click", () => void this.openFileDialog());
     $("#welcome-new").addEventListener("click", () => this.newTab());
     $("#welcome-folder").addEventListener("click", () => void this.openFolderDialog());
+    document.addEventListener("contextmenu", (e) => this.onContextMenu(e));
     for (const b of this.tocEl.querySelectorAll<HTMLElement>(".sidebar-tabs button"))
       b.addEventListener("click", () => this.showPanel(b.dataset.panel as "files" | "outline", false));
     window.addEventListener("focus", () => void this.refreshFolder());

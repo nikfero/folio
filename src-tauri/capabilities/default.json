@@ -11,6 +11,8 @@
     "core:window:allow-set-focus",
     "core:window:allow-show",
     "dialog:default",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "opener:default"
   ]
 }

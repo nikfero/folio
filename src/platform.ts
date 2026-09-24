@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { readText as readClipboardText, writeText as writeClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 
 export interface TextFile {
   text: string;
@@ -89,3 +90,13 @@ export const menuVisible = () => invoke<boolean>("menu_visible");
 
 /** Turns the native menu bar on or off for every window (no-op on macOS). */
 export const setMenuVisible = (visible: boolean) => invoke<void>("set_menu_visible", { visible });
+
+// ---- clipboard (the native plugin works where the web Clipboard API is blocked)
+
+export const writeClipboard = (text: string): Promise<void> =>
+  writeClipboardText(text).catch(() => navigator.clipboard.writeText(text));
+
+export const readClipboard = (): Promise<string> =>
+  readClipboardText()
+    .catch(() => navigator.clipboard.readText())
+    .catch(() => "");
