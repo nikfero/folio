@@ -6,6 +6,7 @@ import katexCss from "katex/dist/katex.min.css?raw";
 import katexPkg from "katex/package.json";
 import { escapeHtml } from "./markdown";
 import type { ExportOptions } from "./export-options";
+import { themeCss as previewThemeCss } from "./themes";
 
 // KaTeX's fonts as data: URIs, loaded only when a document with math is exported.
 const katexFonts = import.meta.glob("/node_modules/katex/dist/fonts/*.woff2", {
@@ -166,22 +167,28 @@ export async function buildHtml(body: HTMLElement, fallbackTitle: string, opts: 
       : `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@${katexPkg.version}/dist/katex.min.css">\n`;
   const toc = opts.toc !== "none" ? tableOfContents(clone) : "";
   const layout = `:root { --zoom: 1; --content-width: ${WIDTHS[opts.width]}; --font-text: ${FONTS[opts.font]}; }`;
+  const theme = opts.style === "preview" ? await previewThemeCss().catch(() => "") : "";
+  // Themes style dark mode with [data-theme="dark"], as in the app; "system" follows the reader's OS.
+  const dataTheme =
+    opts.theme === "system"
+      ? `<script>(()=>{const m=matchMedia("(prefers-color-scheme: dark)"),s=()=>document.documentElement.dataset.theme=m.matches?"dark":"light";s();m.addEventListener("change",s)})()</script>\n`
+      : "";
 
   return `<!doctype html>
-<html lang="en">
+<html lang="en"${opts.theme === "system" ? "" : ` data-theme="${opts.theme}"`}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="Folio">
-${opts.theme === "system" ? "" : `<meta name="color-scheme" content="${opts.theme}">\n`}<title>${escapeHtml(title)}</title>
+${opts.theme === "system" ? "" : `<meta name="color-scheme" content="${opts.theme}">\n`}${dataTheme}<title>${escapeHtml(title)}</title>
 ${math}<style>
 ${themeCss(opts.theme)}
 ${layout}
 ${PAGE_CSS}
 ${markdownCss}
 </style>
-${opts.css.trim() ? `<style>\n${opts.css}\n</style>\n` : ""}</head>
-<body class="toc-${toc ? opts.toc : "none"}">
+${theme.trim() ? `<style>\n${theme}\n</style>\n` : ""}${opts.css.trim() ? `<style>\n${opts.css}\n</style>\n` : ""}</head>
+<body class="folio-preview toc-${toc ? opts.toc : "none"}">
 <div class="page">
 ${toc}
 <article class="markdown-body">

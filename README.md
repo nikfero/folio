@@ -16,8 +16,12 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 - **Go to File** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>P</kbd>) with fuzzy search, and a **Command Palette** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>, or type `>` in Go to File)
 - **Change detection**: when another program (git, an AI agent, another editor) changes an open file, Folio shows a banner with **Reload** / **Ignore**. Automatic reloading can be turned on for all files in Settings, or per file with the **Auto-reload** toggle in the status bar; it never discards unsaved edits
 - GitHub-flavored Markdown: tables, task lists, footnotes, autolinks, syntax-highlighted code with a copy button
+- **Callouts**: `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]` as coloured boxes, with custom titles and foldable ones (`[!NOTE]-`)
+- **Collapsible sections**: fold a heading's section with the arrow beside it (preview and Live) or in the editor's gutter; Fold All / Unfold All (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>[</kbd> / <kbd>]</kbd>)
 - **Clickable checkboxes** that update (and save) the source file
-- **Editing helpers**: shortcuts for bold, italic, inline code, strikethrough and links; paste a URL over text to link it; paste or drop an image to save it into `images/` next to the document; align table columns
+- **Editing helpers**: shortcuts for bold, italic, inline code, strikethrough and links; paste a URL over text to link it; paste an image, or drag image files in from the file manager, to put them in `images/` next to the document
+- **Table editing** from the right-click menu: insert, move and delete rows and columns, set column alignment, align the columns, insert a new table
+- **Crash-safe**: unsaved changes are kept on disk as you type, and come back after a crash or power cut
 - **Export** a standalone HTML file, or **Print / Save as PDF**. Export options: table of contents (top or sidebar), light / dark / follow-the-reader theme, font, text width, metadata, extra CSS; images and math fonts are embedded so the file works offline
 - **Focus mode** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>): only the text in a calm centered column; the current sentence or paragraph stays bright, typewriter scrolling keeps your line mid-screen, and a small bar appears when you move the mouse
 - **Full screen**: <kbd>F11</kbd> (<kbd>⌃</kbd>+<kbd>⌘</kbd>+<kbd>F</kbd> on macOS)
@@ -26,6 +30,7 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 - YAML frontmatter shown as a tidy metadata table
 - Outline sidebar that follows your position, Find in the preview, word count and reading time
 - Light/dark/system themes and zoom
+- **Preview themes**: GitHub, Academic and Sepia built in, or your own CSS file (reloaded as you edit it); also used for HTML exports. See **[docs/THEMES.md](docs/THEMES.md)**, with a template and ready-made snippets in [`themes/`](themes)
 - **Remembers your session**: open tabs, view mode, scroll position and window size come back on the next launch
 - **Settings** (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>,</kbd>): default view, auto-save, editor font size, line numbers, line wrapping, preview font and text width
 - Native menu bar on macOS; optional on Windows and Linux (off by default, turn it on in Settings)
@@ -64,6 +69,8 @@ In the editor:
 | Inline code / Strikethrough | Ctrl+\` / Ctrl+Shift+X | ⌘\` / ⌘⇧X |
 | Link | Ctrl+K | ⌘K |
 | Align table columns | Shift+Alt+F | ⇧⌥F |
+| Fold / unfold section | Ctrl+Shift+[ / Ctrl+Shift+] | ⌘⌥[ / ⌘⌥] |
+| Fold / unfold all | Ctrl+Alt+[ / Ctrl+Alt+] | ⌃⌥[ / ⌃⌥] |
 
 ## Development
 
@@ -85,7 +92,7 @@ npm run tauri build        # build an installer for this OS
 src/                 frontend (TypeScript, no framework)
   app.ts             tabs, modes, open/save, reload, commands, shortcuts, windows
   editor.ts          CodeMirror 6 setup
-  editing.ts         formatting commands and table alignment
+  editing.ts         formatting commands and table editing
   livepreview.ts     Live mode (Markdown rendered inside the editor)
   liveblocks.ts      Live mode tables, math and diagrams
   focus.ts           focus mode paragraph dimming
@@ -96,10 +103,12 @@ src/                 frontend (TypeScript, no framework)
   palette.ts         Go to File / command palette
   export.ts          standalone HTML export
   export-options.ts  export options dialog
+  themes.ts          preview themes (built-in and custom CSS files)
   scrollsync.ts      editor <-> preview position mapping
   lazy/              KaTeX and Mermaid, loaded on demand
 src-tauri/           Rust backend: file I/O, folder listing and search, file
-                     actions, image saving, menus, single instance, windows
+                     actions, image saving, crash recovery, menus, windows
+themes/              built-in preview themes, a template, and export snippets
 .github/workflows/   CI and cross-platform release builds
 ```
 

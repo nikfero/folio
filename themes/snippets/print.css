@@ -1,0 +1,25 @@
+/* Better printing / PDF: each ## section starts on a new page, code blocks
+   and tables aren't split across pages, and links show their address.
+
+   Paste into the "Extra CSS" box of Export as HTML, or add to a theme file;
+   it applies when the exported page (or Folio's preview) is printed. */
+
+@media print {
+  .markdown-body h2 {
+    break-before: page;
+  }
+  .markdown-body :is(pre, table, .callout, .mermaid, img) {
+    break-inside: avoid;
+  }
+  .markdown-body :is(h1, h2, h3, h4) {
+    break-after: avoid;
+  }
+  .markdown-body a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: #555;
+  }
+  .markdown-body {
+    font-size: 11pt;
+  }
+}

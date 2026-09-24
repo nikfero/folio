@@ -1,0 +1,13 @@
+/* A wider page with a larger font, for reading on a big screen or
+   presenting; tables and code blocks may use the full width.
+
+   Paste into the "Extra CSS" box of Export as HTML, or add to a theme file. */
+
+.markdown-body {
+  --content-width: 1100px;
+  font-size: 18px;
+}
+.markdown-body table {
+  width: 100%;
+  display: table;
+}

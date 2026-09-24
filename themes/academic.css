@@ -1,0 +1,123 @@
+/* Folio theme: Academic — a paper: serif, justified text, numbered sections.
+
+   The first heading is the title; the next level (## ...) is numbered 1, 2, 3
+   and the one below that 1.1, 1.2... Tables use horizontal rules only. */
+
+.folio-preview {
+  --bg: #fffefb;
+  --bg-alt: #f5f3ee;
+  --bg-code: #f3f1ec;
+  --fg: #1b1b1b;
+  --fg-muted: #555249;
+  --fg-faint: #9a968c;
+  --border: #d8d4ca;
+  --accent: #1d4f91;
+  --font-text: Charter, "Bitstream Charter", "Sitka Text", Cambria, "Iowan Old Style", Georgia, serif;
+}
+
+:root[data-theme="dark"] .folio-preview {
+  --bg: #1d1c1a;
+  --bg-alt: #262522;
+  --bg-code: #272623;
+  --fg: #e8e4dc;
+  --fg-muted: #b3ada2;
+  --fg-faint: #7d786f;
+  --border: #45423c;
+  --accent: #8fb3ea;
+}
+
+.folio-preview .markdown-body {
+  line-height: 1.6;
+  text-align: justify;
+  hyphens: auto;
+  counter-reset: section;
+}
+
+/* Title */
+.folio-preview .markdown-body h1 {
+  margin-bottom: 1.2em;
+  font-size: 2.1em;
+  font-weight: 600;
+  text-align: center;
+  border: none;
+}
+
+/* Numbered sections */
+.folio-preview .markdown-body :is(h2, h3, h4) {
+  font-weight: 600;
+  text-align: left;
+  border: none;
+}
+.folio-preview .markdown-body h2 {
+  font-size: 1.4em;
+  counter-reset: subsection;
+  counter-increment: section;
+}
+.folio-preview .markdown-body h3 {
+  font-size: 1.15em;
+  counter-increment: subsection;
+}
+.folio-preview .markdown-body h2::before {
+  content: counter(section) ".";
+  margin-right: 0.6em;
+}
+.folio-preview .markdown-body h3::before {
+  content: counter(section) "." counter(subsection);
+  margin-right: 0.6em;
+}
+
+.folio-preview .markdown-body a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+/* Quotes: indented, italic, no bar */
+.folio-preview .markdown-body blockquote {
+  margin-left: 2em;
+  margin-right: 2em;
+  padding: 0;
+  border: none;
+  font-style: italic;
+  color: var(--fg-muted);
+}
+
+/* Tables: rules above, below and under the header only (not the metadata table) */
+.folio-preview .markdown-body table:not(.frontmatter) {
+  margin-left: auto;
+  margin-right: auto;
+  border-top: 2px solid var(--fg);
+  border-bottom: 2px solid var(--fg);
+}
+.folio-preview .markdown-body table:not(.frontmatter) :is(th, td) {
+  border: none;
+  padding: 5px 14px;
+}
+.folio-preview .markdown-body table:not(.frontmatter) th {
+  background: none;
+  border-bottom: 1px solid var(--fg);
+}
+.folio-preview .markdown-body tr:nth-child(2n) td {
+  background: none;
+}
+
+/* A picture on its own line is centred, like a figure */
+.folio-preview .markdown-body p > img:only-child {
+  display: block;
+  margin: 0 auto;
+}
+
+.folio-preview .markdown-body pre {
+  border-radius: 3px;
+  text-align: left;
+}
+
+.folio-preview .markdown-body hr {
+  width: 40%;
+  height: 1px;
+  margin: 2em auto;
+}
+
+.folio-preview .markdown-body .footnotes {
+  text-align: left;
+}

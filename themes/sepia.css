@@ -1,0 +1,66 @@
+/* Folio theme: Sepia — warm paper tones and a book face, easy on the eyes. */
+
+.folio-preview {
+  --bg: #f4ecd8;
+  --bg-alt: #ebe0c7;
+  --bg-code: #ece2ca;
+  --fg: #3b2f23;
+  --fg-muted: #6b5a45;
+  --fg-faint: #a08d72;
+  --border: #d9c9a8;
+  --accent: #9a4a1c;
+  --font-text: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+}
+
+:root[data-theme="dark"] .folio-preview {
+  --bg: #2a241d;
+  --bg-alt: #332c24;
+  --bg-code: #362e25;
+  --fg: #e9dcc3;
+  --fg-muted: #b8a88c;
+  --fg-faint: #7c6e59;
+  --border: #4a3f33;
+  --accent: #e0955a;
+}
+
+.folio-preview .markdown-body {
+  line-height: 1.75;
+}
+
+.folio-preview .markdown-body :is(h1, h2, h3) {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.folio-preview .markdown-body :is(h1, h2) {
+  border-bottom-style: dotted;
+}
+
+.folio-preview .markdown-body a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.folio-preview .markdown-body blockquote {
+  font-style: italic;
+  border-left-color: var(--accent);
+}
+
+.folio-preview .markdown-body pre,
+.folio-preview .markdown-body :not(pre) > code {
+  border: 1px solid var(--border);
+}
+
+/* A section break drawn as an asterism instead of a line */
+.folio-preview .markdown-body hr {
+  height: auto;
+  margin: 2em 0;
+  background: none;
+  text-align: center;
+  overflow: visible;
+}
+.folio-preview .markdown-body hr::after {
+  content: "⁂";
+  color: var(--fg-faint);
+  font-size: 1.2em;
+}

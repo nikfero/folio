@@ -1,5 +1,12 @@
 /* Rendered Markdown, loosely following GitHub's typography. */
 
+/* The scrolling area around the document (the preview pane, or <body> in an export);
+   themes can set --bg, --fg... here to recolour the preview only. */
+.folio-preview {
+  background: var(--bg);
+  color: var(--fg);
+}
+
 .markdown-body {
   max-width: var(--content-width, 820px);
   margin: 0 auto;

@@ -1,0 +1,100 @@
+/* Folio theme: My theme — a starting point for your own theme.
+
+   Copy this file anywhere, rename it, and pick it in
+   Settings → Preview → Theme → Custom CSS file…
+   Folio reloads it every time you save it, so you can edit it with the
+   preview open next to it. Delete whatever you don't need: everything here
+   only restates Folio's defaults.
+
+   Full guide: docs/THEMES.md */
+
+/* ------------------------------------------------------------------ colours
+   .folio-preview is the area around the document (the preview pane, or the
+   page of an HTML export). Setting variables here changes the preview only,
+   never the rest of Folio. */
+
+.folio-preview {
+  --bg: #fdfcfa; /* page background */
+  --bg-alt: #f4f2ee; /* table headers, striped rows, details */
+  --bg-code: #f3f1ec; /* code blocks and `inline code` */
+  --fg: #1f2328; /* text */
+  --fg-muted: #5f6670; /* quotes, footnotes, h6 */
+  --fg-faint: #a3a8ae; /* the faintest text */
+  --border: #e2ded6; /* rules, table borders, heading underlines */
+  --accent: #3a5ccc; /* links, checkboxes */
+
+  --font-text: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  /* --content-width: 820px; */ /* width of the text column ("none" = full width) */
+
+  /* Callout colours: > [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION] */
+  --callout-note: #0969da;
+  --callout-tip: #1a7f37;
+  --callout-important: #8250df;
+  --callout-warning: #9a6700;
+  --callout-caution: #cf222e;
+
+  /* Code highlighting */
+  --syn-keyword: #a626a4;
+  --syn-string: #3f8a2f;
+  --syn-number: #b76b01;
+  --syn-comment: #8b949e;
+  --syn-function: #3a5ccc;
+  --syn-type: #b0620b;
+  --syn-property: #b3404a;
+  --syn-tag: #b3404a;
+  --syn-meta: #a0703a;
+}
+
+/* Dark mode: Folio (and a "follow the system" export) marks the page with
+   data-theme="dark". Override the colours you changed above. */
+:root[data-theme="dark"] .folio-preview {
+  --bg: #1b1c1f;
+  --bg-alt: #232428;
+  --bg-code: #25272b;
+  --fg: #e3e4e6;
+  --fg-muted: #9ca1a8;
+  --fg-faint: #5d6269;
+  --border: #33353a;
+  --accent: #7c9cff;
+}
+
+/* ----------------------------------------------------------------- elements
+   .markdown-body is the document itself. Start every selector with
+   .folio-preview .markdown-body so it wins over Folio's own rules and never
+   touches the rest of the app. */
+
+.folio-preview .markdown-body {
+  /* font-size: calc(17px * var(--zoom)); keep var(--zoom) so Ctrl +/- still works */
+  line-height: 1.65;
+}
+
+.folio-preview .markdown-body h1 {
+}
+.folio-preview .markdown-body h2 {
+}
+.folio-preview .markdown-body a {
+}
+.folio-preview .markdown-body blockquote {
+}
+.folio-preview .markdown-body pre {
+}
+.folio-preview .markdown-body :not(pre) > code {
+}
+.folio-preview .markdown-body table {
+}
+.folio-preview .markdown-body :is(th, td) {
+}
+.folio-preview .markdown-body img {
+}
+.folio-preview .markdown-body hr {
+}
+
+/* Other things you can style:
+   .callout, .callout-title, .callout-note ... .callout-caution   callouts
+   li.task-item, .task-box                                         task lists
+   .frontmatter                                                    the metadata table
+   .footnotes                                                      footnotes
+   .math, .math.display                                            formulas
+   .mermaid                                                        diagrams
+   @media print { ... }                                            printing / PDF */

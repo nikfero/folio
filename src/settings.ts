@@ -22,6 +22,9 @@ export interface Settings {
   wrapLines: boolean;
   previewFont: "sans" | "serif";
   previewWidth: "narrow" | "medium" | "wide" | "full";
+  /** "" = Folio's own look, a built-in theme's id, or "custom" for `previewThemeFile`. */
+  previewTheme: string;
+  previewThemeFile: string;
   exportOptions: Partial<ExportOptions>;
   focusHighlight: FocusHighlight;
   focusTypewriter: boolean;
@@ -44,6 +47,8 @@ const defaults: Settings = {
   wrapLines: true,
   previewFont: "sans",
   previewWidth: "medium",
+  previewTheme: "",
+  previewThemeFile: "",
   exportOptions: {},
   focusHighlight: "sentence",
   focusTypewriter: true,

@@ -1,6 +1,9 @@
 import * as settings from "./settings";
 import type { Settings } from "./settings";
 import { icons } from "./icons";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { builtinThemes } from "./themes";
+import { basename } from "./platform";
 
 type Option<T> = [value: T, label: string];
 
@@ -10,6 +13,10 @@ interface Row<K extends keyof Settings = keyof Settings> {
   hint?: string;
   /** A select with these options; omitted for on/off switches. */
   options?: Option<Settings[K]>[];
+  /** A file picker (the setting holds the path) accepting these extensions. */
+  file?: string[];
+  /** Shown only while this returns true (re-checked after every change). */
+  visible?: () => boolean;
 }
 
 interface Section {
@@ -83,6 +90,23 @@ function sections(opts: { menuBar: boolean }): Section[] {
       title: "Preview",
       rows: [
         {
+          key: "previewTheme",
+          label: "Theme",
+          hint: "Also used for HTML exports; themes may set their own font",
+          options: [
+            ["", "Folio"],
+            ...builtinThemes.map((t): Option<string> => [t.id, t.name]),
+            ["custom", "Custom CSS file…"],
+          ],
+        },
+        {
+          key: "previewThemeFile",
+          label: "Custom CSS file",
+          hint: "Reloaded when you change it. How to write one: docs/THEMES.md",
+          file: ["css"],
+          visible: () => settings.get("previewTheme") === "custom",
+        },
+        {
           key: "previewFont",
           label: "Font",
           options: [
@@ -119,11 +143,21 @@ export function openSettings(onChange: (key: keyof Settings) => void, opts: { me
   panel.setAttribute("aria-label", "Settings");
   panel.innerHTML = `<div class="settings-head"><h2>Settings</h2><button class="icon-btn" data-close aria-label="Close">${icons.close}</button></div>`;
 
+  const rendered: [Row, HTMLElement][] = [];
+  const changed = (key: keyof Settings) => {
+    for (const [row, el] of rendered) el.hidden = row.visible ? !row.visible() : false;
+    onChange(key);
+  };
   for (const section of sections(opts)) {
     const box = document.createElement("section");
     box.innerHTML = `<h3></h3>`;
     box.querySelector("h3")!.textContent = section.title;
-    for (const row of section.rows) box.appendChild(renderRow(row, onChange));
+    for (const row of section.rows) {
+      const el = renderRow(row, changed, panel);
+      el.hidden = row.visible ? !row.visible() : false;
+      rendered.push([row, el]);
+      box.appendChild(el);
+    }
     panel.appendChild(box);
   }
   const foot = document.createElement("p");
@@ -155,7 +189,41 @@ export function openSettings(onChange: (key: keyof Settings) => void, opts: { me
   panel.querySelector<HTMLElement>("select, input")?.focus();
 }
 
-function renderRow(row: Row, onChange: (key: keyof Settings) => void): HTMLElement {
+/** Asks for a file for a `file` row; resolves with whether one was chosen. */
+async function pickFile(row: Row): Promise<boolean> {
+  const current = String(settings.get(row.key) ?? "");
+  const picked = await openDialog({
+    filters: [{ name: row.label, extensions: row.file! }],
+    defaultPath: current || undefined,
+  });
+  if (typeof picked !== "string") return false;
+  settings.set(row.key, picked as never);
+  return true;
+}
+
+function renderRow(row: Row, onChange: (key: keyof Settings) => void, panel: HTMLElement): HTMLElement {
+  if (row.file) {
+    const el = document.createElement("div");
+    el.className = "settings-row";
+    el.dataset.key = row.key;
+    el.innerHTML = `<span class="settings-label"><span></span><small></small></span><span class="settings-file"><span class="settings-file-name"></span><button type="button" class="btn small">Choose…</button></span>`;
+    el.querySelector(".settings-label > span")!.textContent = row.label;
+    el.querySelector("small")!.textContent = row.hint ?? "";
+    const name = el.querySelector<HTMLElement>(".settings-file-name")!;
+    const show = () => {
+      const path = String(settings.get(row.key) ?? "");
+      name.textContent = path ? basename(path) : "None";
+      name.title = path;
+    };
+    show();
+    el.querySelector("button")!.addEventListener("click", async () => {
+      if (await pickFile(row)) {
+        show();
+        onChange(row.key);
+      }
+    });
+    return el;
+  }
   const el = document.createElement("label");
   el.className = "settings-row";
   el.innerHTML = `<span class="settings-label"><span></span><small></small></span>`;
@@ -169,8 +237,19 @@ function renderRow(row: Row, onChange: (key: keyof Settings) => void): HTMLEleme
       const opt = new Option(label, String(i), false, value === current);
       select.appendChild(opt);
     });
-    select.addEventListener("change", () => {
+    select.addEventListener("change", async () => {
+      const previous = settings.get(row.key);
       settings.set(row.key, row.options![Number(select.value)][0]);
+      // A custom theme needs a file: ask for one, and go back if none is chosen.
+      if (row.key === "previewTheme" && settings.get("previewTheme") === "custom" && !settings.get("previewThemeFile")) {
+        if (!(await pickFile({ key: "previewThemeFile", label: "CSS", file: ["css"] }))) {
+          settings.set(row.key, previous as never);
+          select.value = String(row.options!.findIndex(([v]) => v === previous));
+          return;
+        }
+        const name = panel.querySelector('[data-key="previewThemeFile"] .settings-file-name');
+        if (name) name.textContent = basename(settings.get("previewThemeFile"));
+      }
       onChange(row.key);
     });
     el.appendChild(select);

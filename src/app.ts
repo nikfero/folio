@@ -42,6 +42,7 @@ import { FileTree } from "./filetree";
 import { SearchPanel } from "./search";
 import { buildHtml } from "./export";
 import { askExportOptions } from "./export-options";
+import { applyPreviewTheme, refreshCustomTheme } from "./themes";
 import { openPalette, type PaletteItem, type PaletteSource } from "./palette";
 import {
   MARKDOWN_EXTS,
@@ -187,6 +188,7 @@ export class App {
   private wordCount = 0;
   private restoring = true;
   private focusMode = false;
+  private themeError: string | null = null;
   /** The view mode focus mode replaced (Split becomes Live), restored on exit. */
   private focusRestoreMode: Mode | null = null;
   private focusBarTimer = 0;
@@ -815,8 +817,8 @@ export class App {
       ["mode-edit", "View: Edit"],
       ["cycle-mode", "View: Cycle Read / Live / Split / Edit", keys("E")],
       ["toggle-sidebar", "Toggle Sidebar", keys("\\")],
-      ["fold-all", "Fold All Sections", isMac ? "⌘⌥[" : "Ctrl+Alt+["],
-      ["unfold-all", "Unfold All Sections", isMac ? "⌘⌥]" : "Ctrl+Alt+]"],
+      ["fold-all", "Fold All Sections", isMac ? "⌃⌥[" : "Ctrl+Alt+["],
+      ["unfold-all", "Unfold All Sections", isMac ? "⌃⌥]" : "Ctrl+Alt+]"],
       ["show-files", "Show Files"],
       ["toggle-outline", "Show Outline", keys("Shift+O")],
       ["find", "Find", keys("F")],
@@ -920,6 +922,7 @@ export class App {
     if (this.polling) return;
     this.polling = true;
     try {
+      if (await refreshCustomTheme()) this.flash("Theme reloaded");
       for (const tab of [...this.tabs]) {
         if (!tab.path || tab.saving) continue;
         const mtime = await fileMtime(tab.path).catch(() => null);
@@ -1374,6 +1377,10 @@ export class App {
     root.setProperty("--editor-font-size", `${settings.get("editorFontSize")}px`);
     root.setProperty("--font-text", settings.get("previewFont") === "serif" ? SERIF : "var(--font-ui)");
     root.setProperty("--content-width", WIDTHS[settings.get("previewWidth")] ?? WIDTHS.medium);
+    void applyPreviewTheme().then((error) => {
+      if (error && error !== this.themeError) toast(error, "error");
+      this.themeError = error;
+    });
     const effects = setEditorConfig({ lineNumbers: settings.get("lineNumbers"), wrapLines: settings.get("wrapLines") });
     this.view.dispatch({ effects });
     for (const t of this.tabs) if (t !== this.active) t.state = t.state.update({ effects }).state;
@@ -2201,8 +2208,9 @@ export class App {
         if (e.ctrlKey && key === "tab") id = e.shiftKey ? "prev-tab" : "next-tab";
         // Alt combinations: match the physical key (on macOS Option changes e.key).
         else if (primary && e.altKey && !e.shiftKey && e.code === "KeyO") id = "open-folder";
-        else if (primary && e.altKey && !this.view.hasFocus && (e.code === "BracketLeft" || e.code === "BracketRight"))
-          id = e.code === "BracketLeft" ? "fold-all" : "unfold-all"; // in the editor CodeMirror handles these
+        // Ctrl (also on macOS) + Alt + [ / ], as in CodeMirror, which handles them in the editor.
+        else if (e.ctrlKey && e.altKey && !this.view.hasFocus && (e.code === "BracketLeft" || e.code === "BracketRight"))
+          id = e.code === "BracketLeft" ? "fold-all" : "unfold-all";
         else if (primary && !e.altKey) {
           id = shortcuts[(e.shiftKey ? "shift+" : "") + key];
           if (id === "find" && this.view.hasFocus) id = undefined; // CodeMirror's own search panel

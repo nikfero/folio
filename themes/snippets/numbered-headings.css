@@ -1,0 +1,28 @@
+/* Numbers the sections of a document: ## headings 1, 2, 3; ### headings
+   1.1, 1.2; #### headings 1.1.1. The # heading (the title) isn't numbered.
+
+   Paste into the "Extra CSS" box of Export as HTML, or add to a theme file. */
+
+.markdown-body {
+  counter-reset: h2;
+}
+.markdown-body h2 {
+  counter-reset: h3;
+  counter-increment: h2;
+}
+.markdown-body h3 {
+  counter-reset: h4;
+  counter-increment: h3;
+}
+.markdown-body h4 {
+  counter-increment: h4;
+}
+.markdown-body h2::before {
+  content: counter(h2) ". ";
+}
+.markdown-body h3::before {
+  content: counter(h2) "." counter(h3) " ";
+}
+.markdown-body h4::before {
+  content: counter(h2) "." counter(h3) "." counter(h4) " ";
+}
