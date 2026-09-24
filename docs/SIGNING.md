@@ -114,7 +114,7 @@ Their conditions change from time to time, so check the current ones on [signpat
 
 ### Wiring it in
 
-Once you have those, the Windows job of the release workflow changes like this. I can do this part.
+Once you have those, the Windows job of the release workflow changes like this (SignPath's documentation has the details):
 
 1. Build the installers without uploading them yet.
 2. Send them to SignPath with their action (`signpath/github-action-submit-signing-request`).
