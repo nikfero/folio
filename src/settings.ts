@@ -7,7 +7,7 @@ export interface Settings {
   defaultMode: Mode;
   /** Whether the sidebar is visible. */
   toc: boolean;
-  sidebarPanel: "files" | "outline";
+  sidebarPanel: "files" | "search" | "outline";
   sidebarWidth: number;
   split: number;
   zoom: number;

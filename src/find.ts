@@ -60,6 +60,14 @@ export class FindBar {
     this.search(true);
   }
 
+  /** Opens the bar searching for `query` and jumps to the first match. */
+  openWith(query: string): void {
+    this.el.hidden = false;
+    this.input.value = query;
+    this.index = -1;
+    this.search(true);
+  }
+
   close(): void {
     this.el.hidden = true;
     this.ranges = [];

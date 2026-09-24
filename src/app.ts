@@ -18,6 +18,7 @@ import { closeMenu, confirmUnsaved, dialog, promptDialog, showMenu, toast, type 
 import * as settings from "./settings";
 import { openSettings } from "./settings-panel";
 import { FileTree } from "./filetree";
+import { SearchPanel } from "./search";
 import { openPalette, type PaletteItem, type PaletteSource } from "./palette";
 import {
   MARKDOWN_EXTS,
@@ -28,6 +29,7 @@ import {
   isWindows,
   joinPath,
   renamePath,
+  searchFolder,
   trashPath,
   fileMtime,
   frontendReady,
@@ -114,6 +116,11 @@ export class App {
     recentFolders: () => settings.recentFolders(),
     newFile: (dirRel) => void this.newFileIn(dirRel),
   });
+  private searchPanel = new SearchPanel($("#search-panel"), {
+    folder: () => this.fileTree.folder,
+    search: (q, caseSensitive, regex) => searchFolder(this.fileTree.folder!, q, caseSensitive, regex),
+    open: (path, line, col, len, matched) => void this.revealMatch(path, line, col, len, matched),
+  });
   private banner = $("#banner");
   private welcome = $("#welcome");
 
@@ -143,6 +150,7 @@ export class App {
     "cycle-mode": () => this.cycleMode(),
     "toggle-outline": () => this.showPanel("outline", true),
     "show-files": () => this.showPanel("files", false),
+    "search-folder": () => this.showSearch(),
     "toggle-sidebar": () => this.setSidebar(this.tocEl.hidden === true),
     "open-folder": () => this.openFolderDialog(),
     "close-folder": () => this.setFolder(null),
@@ -434,6 +442,7 @@ export class App {
       this.workspace.classList.add("has-folder");
       settings.addRecentFolder(path);
       if (!quiet) this.showPanel("files", false);
+      this.searchPanel.refresh();
       this.scheduleSessionSave();
       return true;
     } catch (e) {
@@ -450,6 +459,7 @@ export class App {
   private setFolder(path: null): void {
     this.fileTree.setFolder(path, []);
     this.workspace.classList.remove("has-folder");
+    this.searchPanel.refresh();
     this.scheduleSessionSave();
   }
 
@@ -576,6 +586,37 @@ export class App {
     }
   }
 
+  // ---------------------------------------------------------------- search
+
+  private showSearch(): void {
+    this.showPanel("search", false);
+    const fromEditor = this.view.hasFocus ? this.view.state.sliceDoc(this.view.state.selection.main.from, this.view.state.selection.main.to) : "";
+    this.searchPanel.focus(fromEditor || window.getSelection()?.toString().trim() || undefined);
+  }
+
+  /** Opens a search result and shows the match: selected in the editor, or highlighted in the preview. */
+  private async revealMatch(path: string, line: number, col: number, len: number, matched: string): Promise<void> {
+    const tab = await this.openPath(path);
+    if (!tab) return;
+    // Let the tab's own scroll restore run first.
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    if (this.active !== tab) return;
+    if (tab.mode === "read") {
+      this.previewPane.scrollTop = Math.max(0, this.scrollMap.topForLine(line - 1) - 60);
+      this.find.openWith(matched);
+      return;
+    }
+    const doc = this.view.state.doc;
+    const l = doc.line(Math.min(line, doc.lines));
+    const from = Math.min(l.from + col, l.to);
+    this.lockSync("preview");
+    this.view.dispatch({
+      selection: { anchor: from, head: Math.min(from + len, l.to) },
+      effects: EditorView.scrollIntoView(from, { y: "center" }),
+    });
+    this.view.focus();
+  }
+
   // --------------------------------------------------------------- palette
 
   private quickOpen(): void {
@@ -614,8 +655,9 @@ export class App {
     const list: [id: string, label: string, shortcut?: string][] = [
       ["quick-open", "Go to File…", keys("P")],
       ["open", "Open File…", keys("O")],
-      ["open-folder", "Open Folder…", keys("Shift+F")],
+      ["open-folder", "Open Folder…", keys("Alt+O")],
       ["close-folder", "Close Folder"],
+      ["search-folder", "Search in Folder", keys("Shift+F")],
       ["new-tab", "New Tab", keys("T")],
       ["new-window", "New Window", keys("Shift+N")],
       ["save", "Save", keys("S")],
@@ -677,6 +719,7 @@ export class App {
       tab.savedDoc = doc;
       tab.external = null;
       this.refreshUi();
+      if (this.fileTree.contains(tab.path)) this.searchPanel.refresh();
       if (!quiet) this.flash("Saved");
       return true;
     } catch (e) {
@@ -985,7 +1028,7 @@ export class App {
    * Shows a sidebar panel. With `toggle`, asking for the panel that is already
    * showing hides the sidebar instead.
    */
-  private showPanel(panel: "files" | "outline", toggle: boolean): void {
+  private showPanel(panel: "files" | "search" | "outline", toggle: boolean): void {
     const showing = this.tocEl.hidden !== true && settings.get("sidebarPanel") === panel;
     if (toggle && showing) return this.setSidebar(false);
     settings.set("sidebarPanel", panel);
@@ -1183,7 +1226,7 @@ export class App {
     return [
       item("New Tab", "new-tab", keys("T")),
       item("Open File…", "open", keys("O")),
-      item("Open Folder…", "open-folder", keys("Shift+F")),
+      item("Open Folder…", "open-folder", keys("Alt+O")),
       item("Close Folder", "close-folder", undefined, !this.fileTree.folder),
       item("Go to File…", "quick-open", keys("P")),
       item("Save", "save", keys("S"), !tab),
@@ -1417,7 +1460,7 @@ export class App {
         { label: "Reveal in Folder", action: () => reveal(path) },
       ];
     const folder = this.fileTree.folder;
-    if (!folder) return [{ label: "Open Folder…", shortcut: keys("Shift+F"), action: () => void this.openFolderDialog() }];
+    if (!folder) return [{ label: "Open Folder…", shortcut: keys("Alt+O"), action: () => void this.openFolderDialog() }];
     const dirRel = target.closest<HTMLElement>(".tree-row.dir")?.dataset.dir;
     if (dirRel !== undefined) {
       const dirPath = joinPath(folder, dirRel);
@@ -1440,7 +1483,7 @@ export class App {
       { label: "Copy Folder Path", action: () => void writeClipboard(folder) },
       { label: "Reveal in File Manager", action: () => reveal(folder) },
       "separator",
-      { label: "Open Another Folder…", shortcut: keys("Shift+F"), action: () => void this.openFolderDialog() },
+      { label: "Open Another Folder…", shortcut: keys("Alt+O"), action: () => void this.openFolderDialog() },
       { label: "Close Folder", action: () => this.setFolder(null) },
     ];
   }
@@ -1480,7 +1523,7 @@ export class App {
     $("#welcome-folder").addEventListener("click", () => void this.openFolderDialog());
     document.addEventListener("contextmenu", (e) => this.onContextMenu(e));
     for (const b of this.tocEl.querySelectorAll<HTMLElement>(".sidebar-tabs button"))
-      b.addEventListener("click", () => this.showPanel(b.dataset.panel as "files" | "outline", false));
+      b.addEventListener("click", () => this.showPanel(b.dataset.panel as "files" | "search" | "outline", false));
     window.addEventListener("focus", () => void this.refreshFolder());
     setInterval(() => void this.refreshFolder(), 10_000);
     for (const el of document.querySelectorAll(".kbd-mod")) el.textContent = isMac ? "⌘" : "Ctrl";
@@ -1648,7 +1691,7 @@ export class App {
       ",": "settings",
       p: "quick-open",
       "shift+p": "command-palette",
-      "shift+f": "open-folder",
+      "shift+f": "search-folder",
       "\\": "toggle-sidebar",
       pagedown: "next-tab",
       pageup: "prev-tab",
@@ -1677,6 +1720,8 @@ export class App {
 
         let id: string | undefined;
         if (e.ctrlKey && key === "tab") id = e.shiftKey ? "prev-tab" : "next-tab";
+        // Alt combinations: match the physical key (on macOS Option changes e.key).
+        else if (primary && e.altKey && !e.shiftKey && e.code === "KeyO") id = "open-folder";
         else if (primary && !e.altKey) {
           id = shortcuts[(e.shiftKey ? "shift+" : "") + key];
           if (id === "find" && this.view.hasFocus) id = undefined; // CodeMirror's own search panel

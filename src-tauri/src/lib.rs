@@ -161,6 +161,96 @@ fn list_folder(root: String) -> Result<FolderListing, String> {
     Ok(FolderListing { files, dirs, truncated })
 }
 
+const MAX_MATCHES: usize = 2_000;
+const MAX_MATCHES_PER_FILE: usize = 200;
+const MAX_SEARCH_FILE_BYTES: u64 = 4 * 1024 * 1024;
+
+#[derive(Serialize)]
+struct LineMatch {
+    /// 1-based line number.
+    line: usize,
+    /// Match start and length in UTF-16 units (JavaScript string offsets) within `text`'s line.
+    col: usize,
+    len: usize,
+    text: String,
+}
+
+#[derive(Serialize)]
+struct FileMatches {
+    path: String,
+    rel: String,
+    matches: Vec<LineMatch>,
+}
+
+#[derive(Serialize)]
+struct SearchResults {
+    files: Vec<FileMatches>,
+    total: usize,
+    truncated: bool,
+}
+
+fn utf16_len(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
+/// Searches the folder's Markdown files for `query` (literal unless `regex`).
+#[tauri::command(async)]
+fn search_folder(root: String, query: String, case_sensitive: bool, regex: bool) -> Result<SearchResults, String> {
+    let pattern = if regex { query } else { regex::escape(&query) };
+    let re = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .size_limit(1 << 20)
+        .build()
+        .map_err(|e| format!("Invalid regular expression: {e}"))?;
+    let root = PathBuf::from(root);
+    let mut entries = Vec::new();
+    let mut dirs = Vec::new();
+    walk(&root, &root, 0, &mut entries, &mut dirs);
+
+    let mut files = Vec::new();
+    let mut total = 0;
+    let mut truncated = false;
+    'files: for entry in entries {
+        let path = Path::new(&entry.path);
+        if std::fs::metadata(path).map(|m| m.len() > MAX_SEARCH_FILE_BYTES).unwrap_or(true) {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(path) else { continue };
+        let text = String::from_utf8_lossy(&bytes);
+        let mut matches = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            for m in re.find_iter(line) {
+                if m.start() == m.end() {
+                    continue; // skip empty regex matches
+                }
+                matches.push(LineMatch {
+                    line: i + 1,
+                    col: utf16_len(&line[..m.start()]),
+                    len: utf16_len(m.as_str()),
+                    text: line.to_string(),
+                });
+                total += 1;
+                if total >= MAX_MATCHES {
+                    truncated = true;
+                    files.push(FileMatches { path: entry.path, rel: entry.rel, matches });
+                    break 'files;
+                }
+                if matches.len() >= MAX_MATCHES_PER_FILE {
+                    truncated = true;
+                    break;
+                }
+            }
+            if matches.len() >= MAX_MATCHES_PER_FILE {
+                break;
+            }
+        }
+        if !matches.is_empty() {
+            files.push(FileMatches { path: entry.path, rel: entry.rel, matches });
+        }
+    }
+    Ok(SearchResults { files, total, truncated })
+}
+
 /// Creates an empty file; fails if something already exists at `path`.
 #[tauri::command]
 fn create_file(path: String) -> Result<(), String> {
@@ -357,7 +447,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&item("new-window", "New Window", Some("CmdOrCtrl+Shift+N"))?)
         .separator()
         .item(&item("open", "Open…", Some("CmdOrCtrl+O"))?)
-        .item(&item("open-folder", "Open Folder…", Some("CmdOrCtrl+Shift+F"))?)
+        .item(&item("open-folder", "Open Folder…", Some("CmdOrCtrl+Alt+O"))?)
         .item(&item("quick-open", "Quick Open…", Some("CmdOrCtrl+P"))?)
         .item(&item("close-folder", "Close Folder", None)?)
         .separator()
@@ -384,6 +474,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .separator()
         .item(&item("toggle-sidebar", "Toggle Sidebar", Some("CmdOrCtrl+\\"))?)
         .item(&item("show-files", "Show Files", None)?)
+        .item(&item("search-folder", "Search in Folder", Some("CmdOrCtrl+Shift+F"))?)
         .item(&item("toggle-outline", "Show Outline", Some("CmdOrCtrl+Shift+O"))?)
         .item(&item("find", "Find", Some("CmdOrCtrl+F"))?)
         .item(&item("toggle-theme", "Toggle Light / Dark Theme", None)?)
@@ -527,6 +618,7 @@ pub fn run() {
             file_mtime,
             frontend_ready,
             list_folder,
+            search_folder,
             create_file,
             create_dir,
             rename_path,

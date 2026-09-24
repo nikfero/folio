@@ -40,6 +40,15 @@ export const fileMtime = (path: string) => invoke<number | null>("file_mtime", {
 export const frontendReady = () => invoke<OpenRequest[]>("frontend_ready");
 
 export const listFolder = (root: string) => invoke<FolderListing>("list_folder", { root });
+export interface SearchResults {
+  files: { path: string; rel: string; matches: { line: number; col: number; len: number; text: string }[] }[];
+  total: number;
+  truncated: boolean;
+}
+
+export const searchFolder = (root: string, query: string, caseSensitive: boolean, regex: boolean) =>
+  invoke<SearchResults>("search_folder", { root, query, caseSensitive, regex });
+
 export const createFile = (path: string) => invoke<void>("create_file", { path });
 export const createDir = (path: string) => invoke<void>("create_dir", { path });
 export const renamePath = (from: string, to: string) => invoke<void>("rename_path", { from, to });

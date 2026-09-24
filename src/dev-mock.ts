@@ -109,6 +109,29 @@ export function installMock(): void {
             .map((d) => d.slice(root.length).replace(/\\/g, "/"));
           return { files: entries, dirs, truncated: false };
         }
+        case "search_folder": {
+          const root = String(args.root).replace(/[\\/]+$/, "") + "\\";
+          const q = String(args.query);
+          const flags = args.caseSensitive ? "g" : "gi";
+          let re: RegExp;
+          try {
+            re = new RegExp(args.regex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
+          } catch (e) {
+            throw new Error(`Invalid regular expression: ${e}`);
+          }
+          let total = 0;
+          const out: { path: string; rel: string; matches: unknown[] }[] = [];
+          for (const [path, f] of files) {
+            if (!path.toLowerCase().startsWith(root.toLowerCase())) continue;
+            const matches: { line: number; col: number; len: number; text: string }[] = [];
+            f.text.split(/\r?\n/).forEach((text, i) => {
+              for (const m of text.matchAll(re)) if (m[0]) matches.push({ line: i + 1, col: m.index!, len: m[0].length, text });
+            });
+            total += matches.length;
+            if (matches.length) out.push({ path, rel: path.slice(root.length).replace(/\\/g, "/"), matches });
+          }
+          return { files: out, total, truncated: false };
+        }
         case "create_file": {
           const path = String(args.path);
           if (files.has(path)) throw new Error("File exists");

@@ -121,7 +121,7 @@ export class FileTree {
   }
 
   private emptyState(): string {
-    const shortcut = isMac ? "⌘⇧F" : "Ctrl+Shift+F";
+    const shortcut = isMac ? "⌘⌥O" : "Ctrl+Alt+O";
     const recent = this.handlers
       .recentFolders()
       .slice(0, 5)
