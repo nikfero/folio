@@ -7,6 +7,29 @@ Folio can restyle the rendered document in two places:
 
 Both are plain CSS. Themes don't change the editor or Live mode, which keep Folio's own look.
 
+Inside Folio, this guide and the example files are always at hand:
+
+- **Settings → Preview → Theme** has two links, **How to write a theme** (opens this guide) and **Save the example files…**.
+- The **Export as HTML** dialog links to this guide from its **Extra CSS** box, and its **Insert a snippet…** menu adds a ready-made snippet to the box.
+- In the command palette (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>), type "themes".
+
+**Save the example files…** asks for a folder and puts a **Folio themes** folder in it:
+
+```
+Folio themes/
+  README.md          this guide
+  template.css       a commented starting point for your own theme
+  github.css         the built-in themes
+  academic.css
+  sepia.css
+  snippets/          extra CSS for exports
+    numbered-headings.css
+    print.css
+    wide-page.css
+```
+
+Saving again updates these files and leaves anything else in the folder alone. Rename your own theme, so a later save doesn't overwrite it.
+
 ## Built-in themes
 
 | Theme | Look |
@@ -22,7 +45,7 @@ Their source is in [`themes/`](../themes): each theme is one CSS file. They're a
 
 ## Using your own theme
 
-1. Copy [`themes/template.css`](../themes/template.css), or one of the built-in themes, anywhere on your computer and rename it.
+1. Save the example files (see above), then copy [`template.css`](../themes/template.css), or one of the built-in themes, and give it a new name.
 2. Open **Settings → Preview → Theme → Custom CSS file…** and choose the file.
 3. Edit the file in any editor. Each time you save it, Folio reloads it and shows "Theme reloaded" in the status bar. Keep the preview open next to the file while you work.
 
@@ -127,7 +150,7 @@ Folio's zoom (Ctrl/⌘ + / −) multiplies the document's font size by `var(--zo
 - **Font, text width, table of contents, metadata, math fonts.**
 - **Extra CSS:** rules added after all other styles, for this export. Type them, or use **Load from file…** to fill the box from a `.css` file. The box is remembered for the next export.
 
-Ready-made snippets for the Extra CSS box are in [`themes/snippets/`](../themes/snippets):
+Ready-made snippets for the Extra CSS box: pick one from **Insert a snippet…** in the dialog, or find them in the `snippets` folder of the example files ([`themes/snippets/`](../themes/snippets) in Folio's source):
 
 | Snippet | Does |
 |---|---|
@@ -139,7 +162,7 @@ Snippets are ordinary CSS, so you can also paste them into a theme file.
 
 ## Adding a built-in theme
 
-Every `.css` file directly in `themes/` (except `template.css`) is built into Folio as a theme. Its name comes from the first comment:
+This is for people building Folio from its source. Every `.css` file directly in `themes/` (except `template.css`) is built into Folio as a theme. Its name comes from the first comment:
 
 ```css
 /* Folio theme: Solarized — a short description */

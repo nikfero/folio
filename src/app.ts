@@ -42,7 +42,7 @@ import { FileTree } from "./filetree";
 import { SearchPanel } from "./search";
 import { buildHtml } from "./export";
 import { askExportOptions } from "./export-options";
-import { applyPreviewTheme, refreshCustomTheme } from "./themes";
+import { applyPreviewTheme, exampleFiles, guideText, refreshCustomTheme } from "./themes";
 import { openPalette, type PaletteItem, type PaletteSource } from "./palette";
 import {
   MARKDOWN_EXTS,
@@ -66,6 +66,7 @@ import {
   ltr,
   newWindow,
   pathKey,
+  writeExamples,
   recoveryList,
   recoveryRemove,
   recoverySave,
@@ -90,6 +91,8 @@ interface Tab {
   id: number;
   path: string | null;
   untitledNo: number;
+  /** A name for a tab without a file (e.g. "Themes guide"). */
+  title?: string;
   state: EditorState;
   savedDoc: Text;
   bom: boolean;
@@ -232,6 +235,8 @@ export class App {
     "toggle-auto-reload": () => this.toggleAutoReload(),
     "toggle-focus": () => this.setFocusMode(!this.focusMode),
     "toggle-fullscreen": () => this.toggleFullscreen(),
+    "theme-guide": () => this.openThemeGuide(),
+    "theme-examples": () => this.saveThemeExamples(),
     "fold-all": () => this.foldAll(true),
     "unfold-all": () => this.foldAll(false),
     "export-html": () => this.exportHtml(),
@@ -328,7 +333,9 @@ export class App {
   }
 
   private tabName(tab: Tab): string {
-    return tab.path ? basename(tab.path) : tab.untitledNo > 1 ? `Untitled-${tab.untitledNo}` : "Untitled";
+    if (tab.path) return basename(tab.path);
+    if (tab.title) return tab.title;
+    return tab.untitledNo > 1 ? `Untitled-${tab.untitledNo}` : "Untitled";
   }
 
   private createTab(path: string | null, text: string, opts: Partial<Tab> = {}): Tab {
@@ -817,6 +824,8 @@ export class App {
       ["mode-edit", "View: Edit"],
       ["cycle-mode", "View: Cycle Read / Live / Split / Edit", keys("E")],
       ["toggle-sidebar", "Toggle Sidebar", keys("\\")],
+      ["theme-guide", "Themes & Custom CSS: Open the Guide"],
+      ["theme-examples", "Themes & Custom CSS: Save the Example Files…"],
       ["fold-all", "Fold All Sections", isMac ? "⌃⌥[" : "Ctrl+Alt+["],
       ["unfold-all", "Unfold All Sections", isMac ? "⌃⌥]" : "Ctrl+Alt+]"],
       ["show-files", "Show Files"],
@@ -1033,6 +1042,12 @@ export class App {
   }
 
   private async followLink(href: string): Promise<void> {
+    // Links in Folio's own documents (the themes guide) that run a command.
+    const command = /^folio:([\w-]+)$/.exec(href)?.[1];
+    if (command) {
+      if (["theme-examples", "theme-guide", "settings"].includes(command)) this.runCommand(command, "ui");
+      return;
+    }
     if (/^[a-z][\w+.-]*:/i.test(href) && !/^file:/i.test(href) && !/^[a-z]:[\\/]/i.test(href)) {
       await openUrl(href).catch((e) => toast(`Couldn't open link: ${e}`, "error"));
       return;
@@ -1401,8 +1416,32 @@ export class App {
         this.applySettings();
         if (key === "theme" || key === "previewFont" || key === "previewWidth") this.renderNow();
       },
-      { menuBar: !isMac, version: this.version },
+      {
+        menuBar: !isMac,
+        version: this.version,
+        themeHelp: { guide: () => this.openThemeGuide(), examples: () => void this.saveThemeExamples() },
+      },
     );
+  }
+
+  /** Opens the themes guide (docs/THEMES.md, built into the app) in a tab. */
+  private openThemeGuide(): void {
+    const open = this.tabs.find((t) => !t.path && t.title === "Themes guide");
+    if (open) return this.activate(open);
+    this.createTab(null, guideText(), { title: "Themes guide", mode: "read" });
+  }
+
+  /** Saves the built-in themes, the template and the snippets to a folder the user picks, and shows it. */
+  private async saveThemeExamples(): Promise<void> {
+    const dir = await openDialog({ directory: true, title: "Choose where to put the “Folio themes” folder" });
+    if (typeof dir !== "string") return;
+    try {
+      const folder = await writeExamples(dir, exampleFiles());
+      await revealItemInDir(joinPath(folder, "template.css")).catch(() => {});
+      toast(`Saved the example files to ${folder}. Start with template.css; README.md is the guide.`);
+    } catch (e) {
+      toast(`Couldn't save the example files: ${e}`, "error");
+    }
   }
 
   private showAbout(): Promise<null> {
@@ -1632,11 +1671,14 @@ export class App {
     const stem = this.tabName(tab).replace(/\.[^.]+$/, "");
     this.renderNow();
     const body = this.preview.body;
-    const options = await askExportOptions({
-      hasMath: !!body.querySelector(".math"),
-      hasFrontmatter: !!body.querySelector(".frontmatter"),
-      hasHeadings: !!body.querySelector("h1[id], h2[id], h3[id], h4[id]"),
-    });
+    const options = await askExportOptions(
+      {
+        hasMath: !!body.querySelector(".math"),
+        hasFrontmatter: !!body.querySelector(".frontmatter"),
+        hasHeadings: !!body.querySelector("h1[id], h2[id], h3[id], h4[id]"),
+      },
+      () => this.openThemeGuide(),
+    );
     if (!options) return;
     const path = await saveDialog({
       defaultPath: tab.path ? joinPath(dirname(tab.path), `${stem}.html`) : `${stem}.html`,

@@ -324,6 +324,25 @@ fn save_image(dir: String, file_name: String, data: String) -> Result<String, St
     Ok(rel)
 }
 
+/// Writes Folio's example theme files into `<dir>/Folio themes/` (replacing
+/// earlier copies of the same files, keeping anything else); returns that folder.
+#[tauri::command]
+fn write_examples(dir: String, files: Vec<(String, String)>) -> Result<String, String> {
+    let folder = Path::new(&dir).join("Folio themes");
+    for (rel, text) in files {
+        let rel = Path::new(&rel);
+        if rel.is_absolute() || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+            return Err(format!("invalid example path {}", rel.display()));
+        }
+        let path = folder.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    }
+    Ok(folder.to_string_lossy().into_owned())
+}
+
 /// Copies an image file (dropped from the file manager) into `<dir>/images/`;
 /// returns its path relative to `dir`.
 #[tauri::command]
@@ -766,6 +785,7 @@ pub fn run() {
             trash_path,
             save_image,
             copy_image,
+            write_examples,
             recovery_save,
             recovery_remove,
             recovery_list,

@@ -26,6 +26,8 @@ export function sanitize(html: string): string {
   return DOMPurify.sanitize(html, {
     ADD_TAGS: ["input"],
     ADD_ATTR: ["data-line", "data-task-line"],
+    // DOMPurify's default list of link schemes, plus folio: for commands in Folio's own guide.
+    ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|folio):|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/i,
     FORBID_TAGS: ["style", "form", "button", "textarea", "select"],
   });
 }

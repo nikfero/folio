@@ -161,6 +161,9 @@ export async function recoveryList(): Promise<Recovery[]> {
   return out;
 }
 
+/** Writes example files into `<dir>/Folio themes/`; resolves with that folder. */
+export const writeExamples = (dir: string, files: [string, string][]) => invoke<string>("write_examples", { dir, files });
+
 /** Copies an image file into `<dir>/images/`; returns the path relative to `dir`. */
 export const copyImage = (dir: string, source: string) => invoke<string>("copy_image", { dir, source });
 

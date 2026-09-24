@@ -186,6 +186,12 @@ export function installMock(): void {
           return null;
         case "recovery_list":
           return Object.values(recovery.previous);
+        case "write_examples": {
+          const folder = `${args.dir as string}\\Folio themes`;
+          for (const [rel, text] of args.files as [string, string][])
+            files.set(`${folder}\\${rel.replace(/\//g, "\\")}`, { text, mtime: Date.now() });
+          return folder;
+        }
         case "copy_image":
           return `images/${String((args as { source: string }).source).split(/[\\/]/).pop()}`;
         case "plugin:opener|open_url":

@@ -4,7 +4,7 @@ import * as settings from "./settings";
 import { icons } from "./icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { readText } from "./platform";
-import { themeName } from "./themes";
+import { snippets, themeName } from "./themes";
 
 export interface ExportOptions {
   /** "preview": the preview's theme (Settings → Preview → Theme); "default": Folio's own look. */
@@ -79,7 +79,10 @@ const selects: { key: "style" | "toc" | "theme" | "font" | "width"; label: strin
 ];
 
 /** Asks for export options; resolves with them, or null if cancelled. */
-export function askExportOptions(doc: { hasMath: boolean; hasFrontmatter: boolean; hasHeadings: boolean }): Promise<ExportOptions | null> {
+export function askExportOptions(
+  doc: { hasMath: boolean; hasFrontmatter: boolean; hasHeadings: boolean },
+  openGuide: () => void,
+): Promise<ExportOptions | null> {
   const saved = { ...defaultExportOptions, ...settings.get("exportOptions") };
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
@@ -117,8 +120,11 @@ export function askExportOptions(doc: { hasMath: boolean; hasFrontmatter: boolea
         ${check("embedFonts", "Embed math fonts", "Works offline; adds about 400 KB", saved.embedFonts, doc.hasMath)}
       </section>
       <section>
-        <label class="export-css"><span class="settings-label"><span>Extra CSS <button type="button" class="btn small" data-load-css>Load from file…</button></span><small>Added after the other styles, e.g. <code>.markdown-body { font-size: 18px }</code></small></span>
-        <textarea name="css" rows="4" spellcheck="false" placeholder="/* optional */"></textarea></label>
+        <div class="export-css"><span class="settings-label"><span>Extra CSS</span><small>Added after the other styles, e.g. <code>.markdown-body { font-size: 18px }</code> · <button type="button" class="link-btn" data-guide>How to style an export</button></small></span>
+        <span class="export-css-tools"><select data-snippet aria-label="Insert a snippet"><option value="">Insert a snippet…</option>${snippets
+          .map((s, i) => `<option value="${i}">${s.file.replace(/\.css$/, "").replace(/-/g, " ")}</option>`)
+          .join("")}</select><button type="button" class="btn small" data-load-css>Load from file…</button></span>
+        <textarea name="css" rows="4" spellcheck="false" placeholder="/* optional */" aria-label="Extra CSS"></textarea></div>
       </section>
       <div class="modal-buttons"><button type="button" class="btn" data-reset>Reset</button><span class="topbar-spacer"></span><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Export…</button></div>`;
     form.querySelector<HTMLTextAreaElement>("textarea")!.value = saved.css;
@@ -157,6 +163,20 @@ export function askExportOptions(doc: { hasMath: boolean; hasFrontmatter: boolea
       done({ ...opts, toc: doc.hasHeadings ? opts.toc : "none" });
     });
     form.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", () => done(null)));
+    form.querySelector("[data-guide]")!.addEventListener("click", (e) => {
+      e.preventDefault();
+      done(null);
+      openGuide();
+    });
+    const snippetPick = form.querySelector<HTMLSelectElement>("[data-snippet]")!;
+    snippetPick.addEventListener("change", () => {
+      const snippet = snippets[Number(snippetPick.value)];
+      snippetPick.value = "";
+      if (!snippet) return;
+      const box = form.querySelector<HTMLTextAreaElement>("textarea")!;
+      box.value = (box.value.trim() ? box.value.trimEnd() + "\n\n" : "") + snippet.css;
+      box.focus();
+    });
     form.querySelector("[data-load-css]")!.addEventListener("click", async (e) => {
       e.preventDefault();
       const picked = await openDialog({ filters: [{ name: "CSS", extensions: ["css"] }] });

@@ -1048,6 +1048,33 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
 
 /* --------------------------------------------------------------- settings */
 
+.settings-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-top: 3px;
+}
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.export-css-tools {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+}
+.export-css-tools select {
+  flex: 1;
+  min-width: 0;
+}
 .settings-file {
   display: flex;
   align-items: center;

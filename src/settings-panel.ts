@@ -17,6 +17,13 @@ interface Row<K extends keyof Settings = keyof Settings> {
   file?: string[];
   /** Shown only while this returns true (re-checked after every change). */
   visible?: () => boolean;
+  /** Links shown under the label. */
+  links?: [label: string, run: () => void][];
+}
+
+export interface ThemeHelp {
+  guide(): void;
+  examples(): void;
 }
 
 interface Section {
@@ -24,7 +31,7 @@ interface Section {
   rows: Row[];
 }
 
-function sections(opts: { menuBar: boolean }): Section[] {
+function sections(opts: { menuBar: boolean; themeHelp: ThemeHelp }, close: () => void): Section[] {
   return [
     {
       title: "General",
@@ -93,6 +100,16 @@ function sections(opts: { menuBar: boolean }): Section[] {
           key: "previewTheme",
           label: "Theme",
           hint: "Also used for HTML exports; themes may set their own font",
+          links: [
+            [
+              "How to write a theme",
+              () => {
+                close();
+                opts.themeHelp.guide();
+              },
+            ],
+            ["Save the example files…", () => opts.themeHelp.examples()],
+          ],
           options: [
             ["", "Folio"],
             ...builtinThemes.map((t): Option<string> => [t.id, t.name]),
@@ -102,7 +119,7 @@ function sections(opts: { menuBar: boolean }): Section[] {
         {
           key: "previewThemeFile",
           label: "Custom CSS file",
-          hint: "Reloaded when you change it. How to write one: docs/THEMES.md",
+          hint: "Reloaded every time you save it",
           file: ["css"],
           visible: () => settings.get("previewTheme") === "custom",
         },
@@ -132,7 +149,10 @@ function sections(opts: { menuBar: boolean }): Section[] {
 let open: HTMLElement | null = null;
 
 /** Opens the settings dialog; `onChange` runs after every change. */
-export function openSettings(onChange: (key: keyof Settings) => void, opts: { menuBar: boolean; version: string }): void {
+export function openSettings(
+  onChange: (key: keyof Settings) => void,
+  opts: { menuBar: boolean; version: string; themeHelp: ThemeHelp },
+): void {
   if (open) return;
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
@@ -148,7 +168,7 @@ export function openSettings(onChange: (key: keyof Settings) => void, opts: { me
     for (const [row, el] of rendered) el.hidden = row.visible ? !row.visible() : false;
     onChange(key);
   };
-  for (const section of sections(opts)) {
+  for (const section of sections(opts, () => close())) {
     const box = document.createElement("section");
     box.innerHTML = `<h3></h3>`;
     box.querySelector("h3")!.textContent = section.title;
@@ -224,11 +244,28 @@ function renderRow(row: Row, onChange: (key: keyof Settings) => void, panel: HTM
     });
     return el;
   }
-  const el = document.createElement("label");
+  // A <label> passes clicks to its first control, which would be a link here.
+  const el = document.createElement(row.links ? "div" : "label");
   el.className = "settings-row";
   el.innerHTML = `<span class="settings-label"><span></span><small></small></span>`;
   el.querySelector(".settings-label > span")!.textContent = row.label;
   el.querySelector("small")!.textContent = row.hint ?? "";
+  if (row.links) {
+    const links = document.createElement("span");
+    links.className = "settings-links";
+    for (const [label, run] of row.links) {
+      const a = document.createElement("button");
+      a.type = "button";
+      a.className = "link-btn";
+      a.textContent = label;
+      a.addEventListener("click", (e) => {
+        e.preventDefault(); // don't also open the row's select
+        run();
+      });
+      links.appendChild(a);
+    }
+    el.querySelector(".settings-label")!.appendChild(links);
+  }
   const current = settings.get(row.key);
 
   if (row.options) {

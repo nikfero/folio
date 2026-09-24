@@ -4,6 +4,7 @@
 
 import * as settings from "./settings";
 import { basename, fileMtime, readText } from "./platform";
+import guideSource from "../docs/THEMES.md?raw";
 
 /** The built-in themes, from /themes/*.css (template.css is only a starting point for your own). */
 const files = import.meta.glob("/themes/*.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
@@ -76,4 +77,39 @@ export async function refreshCustomTheme(): Promise<boolean> {
   custom = null;
   await applyPreviewTheme();
   return true;
+}
+
+// ------------------------------------------------------------ guide and examples
+
+const snippetFiles = import.meta.glob("/themes/snippets/*.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+
+/** Snippets for an export's Extra CSS box: name (from the file name) and CSS. */
+export const snippets = Object.entries(snippetFiles)
+  .map(([path, css]) => ({ file: path.split("/").pop()!, css }))
+  .sort((a, b) => a.file.localeCompare(b.file));
+
+/** Every example file, as [path inside the examples folder, contents]. */
+export function exampleFiles(): [string, string][] {
+  return [
+    // The guide's links point from docs/ into themes/; in the examples folder the files are beside it.
+    ["README.md", guideSource.replace(/\]\(\.\.\/themes\/?/g, "](./")],
+    ...Object.entries(files).map(([path, css]): [string, string] => [path.split("/").pop()!, css]),
+    ...snippets.map((s): [string, string] => [`snippets/${s.file}`, s.css]),
+  ];
+}
+
+/**
+ * The themes guide as shown inside Folio: links to the example files (which
+ * point into the source repository) become plain names, and a note at the top
+ * offers to save the files.
+ */
+export function guideText(): string {
+  const body = guideSource.replace(/\[([^\]]+)\]\(\.\.\/themes[^)]*\)/g, "$1");
+  const note = [
+    "> [!TIP] Example files",
+    "> [Save the example files](folio:theme-examples) to a folder on your computer: the built-in themes, `template.css` to start your own, and the snippets for exports. Then choose a theme in [Settings](folio:settings).",
+    "",
+  ].join("\n");
+  const [title, ...rest] = body.split("\n");
+  return [title, "", note, ...rest].join("\n");
 }
