@@ -146,6 +146,8 @@ export class App {
   private syncLock: "editor" | "preview" | null = null;
   private syncTimer = 0;
   private tocHeadings: { line: number; el: HTMLElement }[] = [];
+  /** The heading last clicked in the outline; it stays current until the view scrolls away from it. */
+  private tocPick: { line: number; top: number } | null = null;
   private wordCount = 0;
   private restoring = true;
   private focusMode = false;
@@ -1054,8 +1056,14 @@ export class App {
       item.title = h.textContent ?? "";
       const line = Number(h.dataset.line ?? 0);
       item.addEventListener("click", () => {
+        // Near the end a heading can't reach the top, so remember what was picked.
+        const pick = (this.tocPick = { line, top: NaN });
         if (editorOnly(this.active?.mode)) revealLine(this.view, line);
         else h.scrollIntoView({ block: "start" });
+        this.updateTocActive();
+        setTimeout(() => {
+          if (this.tocPick === pick) pick.top = this.tocScroller().scrollTop;
+        }, 150);
       });
       this.tocList.appendChild(item);
       this.tocHeadings.push({ line, el: item });
@@ -1071,7 +1079,20 @@ export class App {
         : this.scrollMap.lineForTop(this.previewPane.scrollTop + 24);
     let current = this.tocHeadings[0];
     for (const h of this.tocHeadings) if (h.line <= line + 0.5) current = h;
+    const scroller = this.tocScroller();
+    const pick = this.tocPick && this.tocHeadings.find((h) => h.line === this.tocPick!.line);
+    if (pick && (Number.isNaN(this.tocPick!.top) || Math.abs(scroller.scrollTop - this.tocPick!.top) < 2)) current = pick;
+    else {
+      this.tocPick = null;
+      // Scrolled to the end: the last headings can't reach the top, so the last one is current.
+      if (scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2)
+        current = this.tocHeadings[this.tocHeadings.length - 1];
+    }
     for (const h of this.tocHeadings) h.el.classList.toggle("active", h === current);
+  }
+
+  private tocScroller(): HTMLElement {
+    return editorOnly(this.active?.mode) ? this.view.scrollDOM : this.previewPane;
   }
 
   private setSidebar(visible: boolean): void {
