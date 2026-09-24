@@ -11,6 +11,7 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
+import { liveBlocks } from "./liveblocks";
 
 export interface LiveOptions {
   /** Turns an image `src` from the document into a URL the webview can load. */
@@ -249,5 +250,5 @@ export function livePreview(opts: LiveOptions): Extension {
       return true;
     },
   });
-  return [plugin, links, EditorView.editorAttributes.of({ class: "cm-live" })];
+  return [plugin, links, liveBlocks(), EditorView.editorAttributes.of({ class: "cm-live" })];
 }

@@ -8,7 +8,16 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 
-import { configureLive, createEditor, makeState, minimalReplace, onImagePaste, setEditorConfig, setLive } from "./editor";
+import {
+  configureLive,
+  createEditor,
+  makeState,
+  minimalReplace,
+  onImagePaste,
+  refreshLiveBlocks,
+  setEditorConfig,
+  setLive,
+} from "./editor";
 import { formatTable, insertLink, tableAt, toggleInline } from "./editing";
 import { Preview } from "./preview";
 import { ScrollMap, editorTopLine, revealLine, scrollEditorToLine } from "./scrollsync";
@@ -1176,7 +1185,9 @@ export class App {
 
   private applyTheme(): void {
     const theme = settings.resolvedTheme();
+    const changed = document.documentElement.dataset.theme !== theme;
     document.documentElement.dataset.theme = theme;
+    if (changed && this.active?.mode === "live") refreshLiveBlocks(this.view);
     // The button shows what clicking it does, not the current theme.
     const btn = $("#btn-theme");
     btn.innerHTML = theme === "dark" ? icons.sun : icons.moon;

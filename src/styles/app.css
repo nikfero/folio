@@ -1532,3 +1532,29 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   border-radius: 4px;
   vertical-align: middle;
 }
+
+/* Rendered tables, math and diagrams in Live mode (reusing the preview styles) */
+.cm-live .cm-live-block.markdown-body {
+  white-space: normal; /* the editor's pre-wrap would show the HTML's line breaks */
+  max-width: none;
+  margin: 0;
+  padding: 6px 48px;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.cm-live .cm-live-block.markdown-body:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.cm-live .cm-live-block > :last-child {
+  margin-bottom: 0;
+}
+.cm-live .cm-live-block table {
+  margin: 0;
+}
+.cm-live .cm-live-block .mermaid:not([data-rendered]) {
+  min-height: 60px;
+}
+.cm-live-inline-math {
+  cursor: text;
+}

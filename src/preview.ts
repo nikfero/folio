@@ -22,7 +22,7 @@ DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
   if (node.nodeName === "INPUT" && data.attrName === "type" && data.attrValue !== "checkbox") data.keepAttr = false;
 });
 
-function sanitize(html: string): string {
+export function sanitize(html: string): string {
   return DOMPurify.sanitize(html, {
     ADD_TAGS: ["input"],
     ADD_ATTR: ["data-line", "data-task-line"],

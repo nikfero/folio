@@ -15,6 +15,7 @@ import { HighlightStyle, syntaxHighlighting, indentOnInput, bracketMatching } fr
 import { markdown, markdownLanguage, pasteURLAsLink } from "@codemirror/lang-markdown";
 import { formatTable, insertLink, toggleInline } from "./editing";
 import { livePreview, type LiveOptions } from "./livepreview";
+export { refreshLiveBlocks } from "./liveblocks";
 import { readClipboard } from "./platform";
 import { languages } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
