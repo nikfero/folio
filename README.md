@@ -6,7 +6,7 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 
 - **Four views** (<kbd>Ctrl</kbd>+<kbd>E</kbd> cycles):
   - **Read**: the rendered document
-  - **Live**: edit with formatting shown in place; the Markdown syntax appears only where the cursor is, and the file is never rewritten
+  - **Live**: edit with formatting shown in place, including tables, math and Mermaid diagrams; the Markdown syntax appears only where the cursor is, and the file is never rewritten
   - **Split**: editor and preview side by side, scrolling together
   - **Edit**: plain source
 - **Tabs** you can reorder by dragging, plus **Move Tab to New Window** and **New Window**
@@ -18,7 +18,8 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 - GitHub-flavored Markdown: tables, task lists, footnotes, autolinks, syntax-highlighted code with a copy button
 - **Clickable checkboxes** that update (and save) the source file
 - **Editing helpers**: shortcuts for bold, italic, inline code, strikethrough and links; paste a URL over text to link it; paste or drop an image to save it into `images/` next to the document; align table columns
-- **Export** a standalone HTML file (styles and local images embedded), or **Print / Save as PDF**
+- **Export** a standalone HTML file, or **Print / Save as PDF**. Export options: table of contents (top or sidebar), light / dark / follow-the-reader theme, font, text width, metadata, extra CSS; images and math fonts are embedded so the file works offline
+- **Focus mode** (<kbd>F11</kbd>): full screen with only the text, dimming every paragraph but the current one
 - **Jump to source**: <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+click in the preview (or double-click in Split) moves the editor to that line
 - **Math** (KaTeX) and **Mermaid** diagrams, loaded only when a document uses them
 - YAML frontmatter shown as a tidy metadata table
@@ -50,6 +51,7 @@ A light, fast Markdown viewer and editor for Windows, macOS and Linux, built wit
 | Show outline | Ctrl+Shift+O | ⌘⇧O |
 | Find | Ctrl+F | ⌘F |
 | Zoom in / out / reset | Ctrl+= / Ctrl+- / Ctrl+0 | ⌘= / ⌘- / ⌘0 |
+| Focus mode | F11 (Esc exits) | F11 (Esc exits) |
 | Settings | Ctrl+, | ⌘, |
 
 In the editor:
@@ -83,12 +85,15 @@ src/                 frontend (TypeScript, no framework)
   editor.ts          CodeMirror 6 setup
   editing.ts         formatting commands and table alignment
   livepreview.ts     Live mode (Markdown rendered inside the editor)
+  liveblocks.ts      Live mode tables, math and diagrams
+  focus.ts           focus mode paragraph dimming
   markdown.ts        markdown-it setup and plugins (task lists, math, source lines)
   preview.ts         rendering, sanitizing, links, images, lazy math and diagrams
   filetree.ts        folder tree in the sidebar
   search.ts          Search in Folder panel
   palette.ts         Go to File / command palette
   export.ts          standalone HTML export
+  export-options.ts  export options dialog
   scrollsync.ts      editor <-> preview position mapping
   lazy/              KaTeX and Mermaid, loaded on demand
 src-tauri/           Rust backend: file I/O, folder listing and search, file
