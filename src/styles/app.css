@@ -1558,3 +1558,37 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
 .cm-live-inline-math {
   cursor: text;
 }
+
+/* Export options dialog */
+.modal.export-options {
+  width: min(520px, calc(100vw - 32px));
+}
+.export-css {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+.export-css code {
+  font: 11px var(--font-mono);
+}
+.export-css textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-alt);
+  color: var(--fg);
+  font: 12px/1.5 var(--font-mono);
+  outline: none;
+}
+.export-css textarea:focus {
+  border-color: var(--accent);
+}
+.export-options .modal-buttons {
+  margin-top: 14px;
+}
+.export-options select:disabled {
+  opacity: 0.5;
+}

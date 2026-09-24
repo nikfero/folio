@@ -1,6 +1,7 @@
 // Per-user preferences, kept in localStorage (shared by all Folio windows).
 
 import type { Mode } from "./app";
+import type { ExportOptions } from "./export-options";
 
 export interface Settings {
   theme: "system" | "light" | "dark";
@@ -20,6 +21,7 @@ export interface Settings {
   wrapLines: boolean;
   previewFont: "sans" | "serif";
   previewWidth: "narrow" | "medium" | "wide" | "full";
+  exportOptions: Partial<ExportOptions>;
 }
 
 const defaults: Settings = {
@@ -39,6 +41,7 @@ const defaults: Settings = {
   wrapLines: true,
   previewFont: "sans",
   previewWidth: "medium",
+  exportOptions: {},
 };
 
 const PREFIX = "folio.";

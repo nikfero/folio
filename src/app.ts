@@ -30,6 +30,7 @@ import { openSettings } from "./settings-panel";
 import { FileTree } from "./filetree";
 import { SearchPanel } from "./search";
 import { buildHtml } from "./export";
+import { askExportOptions } from "./export-options";
 import { openPalette, type PaletteItem, type PaletteSource } from "./palette";
 import {
   MARKDOWN_EXTS,
@@ -1326,14 +1327,21 @@ export class App {
     const tab = this.active;
     if (!tab) return;
     const stem = this.tabName(tab).replace(/\.[^.]+$/, "");
+    this.renderNow();
+    const body = this.preview.body;
+    const options = await askExportOptions({
+      hasMath: !!body.querySelector(".math"),
+      hasFrontmatter: !!body.querySelector(".frontmatter"),
+      hasHeadings: !!body.querySelector("h1[id], h2[id], h3[id], h4[id]"),
+    });
+    if (!options) return;
     const path = await saveDialog({
       defaultPath: tab.path ? joinPath(dirname(tab.path), `${stem}.html`) : `${stem}.html`,
       filters: [{ name: "HTML", extensions: ["html", "htm"] }],
     });
     if (!path) return;
     try {
-      this.renderNow();
-      await writeText(path, await buildHtml(this.preview.body, stem), false);
+      await writeText(path, await buildHtml(body, stem, options), false);
       this.flash(`Exported ${basename(path)}`);
     } catch (e) {
       toast(`Couldn't export: ${e}`, "error");
