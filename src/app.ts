@@ -154,6 +154,8 @@ export class App {
   /** The view mode focus mode replaced (Split becomes Live), restored on exit. */
   private focusRestoreMode: Mode | null = null;
   private focusBarTimer = 0;
+  private fullscreen = false;
+  private fullscreenHintTimer = 0;
   private version = "dev";
 
   /** Every user-facing action, addressed by the same ids as the native menu items. */
@@ -1399,6 +1401,49 @@ export class App {
     } catch (e) {
       toast(String(e), "error");
     }
+    void this.syncFullscreen();
+  }
+
+  /** Follows the window's full screen state, however it was entered (F11, menu, macOS green button). */
+  private async syncFullscreen(): Promise<void> {
+    let on = false;
+    try {
+      on = await this.win.isFullscreen();
+    } catch {
+      return;
+    }
+    if (on === this.fullscreen) return;
+    this.fullscreen = on;
+    document.documentElement.classList.toggle("fullscreen", on);
+    if (on) this.showFullscreenHint(3000);
+    else this.hideFullscreenHint(true);
+  }
+
+  private bindFullscreenHint(): void {
+    const hint = $("#fullscreen-hint");
+    hint.querySelector("kbd")!.textContent = FULLSCREEN_KEY;
+    hint.querySelector("button")!.addEventListener("click", () => this.runCommand("toggle-fullscreen", "ui"));
+    hint.addEventListener("mouseleave", () => this.hideFullscreenHint());
+    // Like browsers: touching the top edge brings the hint back.
+    window.addEventListener("pointermove", (e) => {
+      if (this.fullscreen && e.clientY <= 2) this.showFullscreenHint(2500);
+    });
+    void this.win.onResized(() => void this.syncFullscreen());
+    void this.syncFullscreen();
+  }
+
+  /** Shows the hint for `ms`; it stays while the pointer is on it. */
+  private showFullscreenHint(ms: number): void {
+    $("#fullscreen-hint").classList.add("shown");
+    clearTimeout(this.fullscreenHintTimer);
+    this.fullscreenHintTimer = window.setTimeout(() => this.hideFullscreenHint(), ms);
+  }
+
+  private hideFullscreenHint(force = false): void {
+    const hint = $("#fullscreen-hint");
+    clearTimeout(this.fullscreenHintTimer);
+    if (!force && hint.matches(":hover")) return;
+    hint.classList.remove("shown");
   }
 
   private bindFocusBar(): void {
@@ -1755,6 +1800,7 @@ export class App {
     $("#welcome-new").addEventListener("click", () => this.newTab());
     $("#welcome-folder").addEventListener("click", () => void this.openFolderDialog());
     this.bindFocusBar();
+    this.bindFullscreenHint();
     document.addEventListener("contextmenu", (e) => this.onContextMenu(e));
     for (const b of this.tocEl.querySelectorAll<HTMLElement>(".sidebar-tabs button"))
       b.addEventListener("click", () => this.showPanel(b.dataset.panel as "files" | "search" | "outline", false));
@@ -1937,6 +1983,11 @@ export class App {
       "-": "zoom-out",
       "0": "zoom-reset",
     };
+    // The mouse's back / forward buttons would navigate the webview away from the app.
+    for (const type of ["mousedown", "mouseup", "auxclick"])
+      window.addEventListener(type, (e) => {
+        if ((e as MouseEvent).button === 3 || (e as MouseEvent).button === 4) e.preventDefault();
+      });
     window.addEventListener(
       "keydown",
       (e) => {

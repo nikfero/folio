@@ -1759,3 +1759,47 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
   margin-left: 4px;
   font-size: 10px;
 }
+
+/* ------------------------------------------------------------ full screen */
+
+/* Shown for a moment on entering full screen, and again when the pointer touches the top edge. */
+#fullscreen-hint {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 5px 5px 14px;
+  font: 12px var(--font-ui);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translate(-50%, -12px);
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+  pointer-events: none;
+  user-select: none;
+}
+#fullscreen-hint.shown {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+#fullscreen-hint > span:first-child {
+  color: var(--fg);
+  font-weight: 600;
+}
+#fullscreen-hint .btn {
+  border-radius: 999px;
+}
+#fullscreen-hint kbd {
+  margin: 0 2px;
+}
