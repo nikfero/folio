@@ -72,6 +72,13 @@ gh secret set APPLE_TEAM_ID
 
 Each `gh secret set` without `<` asks for the value. Delete `folio.p12.b64` afterwards.
 
+In PowerShell, which has no `<`, make the base64 file and set it like this:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("folio.p12")) | Set-Content folio.p12.b64 -NoNewline
+gh secret set APPLE_CERTIFICATE --body (Get-Content folio.p12.b64 -Raw)
+```
+
 ### 4. Release
 
 The next release run signs and notarizes both macOS builds, which adds a few minutes. To check a downloaded app on a Mac:

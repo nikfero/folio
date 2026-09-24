@@ -159,10 +159,17 @@ Installed copies of Folio check for a new version once a day, and when you choos
 
   **Back up the private key and its password** (a password manager is ideal, then delete the password file). If either is lost, installed copies can't be updated any more and everyone has to reinstall once by hand.
 - **GitHub needs the private key** to sign the release builds. Add two repository secrets once, the key file's contents and its password:
+  In PowerShell:
+  ```powershell
+  gh secret set TAURI_SIGNING_PRIVATE_KEY --body (Get-Content "$HOME\.tauri\folio.key" -Raw)
+  gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body (Get-Content "$HOME\.tauri\folio.key.password" -Raw)
+  ```
+  In bash (macOS, Linux, Git Bash):
   ```bash
   gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/folio.key
   gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.tauri/folio.key.password
   ```
+  Check with `gh secret list`.
   Or on the website: **Settings → Secrets and variables → Actions → New repository secret**, pasting each file's contents. Without them, release builds fail at the end with *"A public key has been found, but no private key"*.
 - **Building installers on your own computer** (`npm run tauri build`) needs the key too. In PowerShell:
   ```powershell
