@@ -186,6 +186,9 @@ export function installMock(): void {
           return null;
         case "recovery_list":
           return Object.values(recovery.previous);
+        // Pretend an update exists: window.__mockUpdate = { rid: 1, currentVersion: "0.4.0", version: "0.5.0", rawJson: {} }
+        case "plugin:updater|check":
+          return (window as unknown as { __mockUpdate?: unknown }).__mockUpdate ?? null;
         case "write_examples": {
           const folder = `${args.dir as string}\\Folio themes`;
           for (const [rel, text] of args.files as [string, string][])

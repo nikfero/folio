@@ -1935,3 +1935,40 @@ body:has(#workspace[data-mode="none"]:not(.has-folder)) #btn-toc {
 #fullscreen-hint kbd {
   margin: 0 2px;
 }
+
+/* ----------------------------------------------------------------- update */
+
+#update-card {
+  position: fixed;
+  right: 16px;
+  bottom: 36px;
+  z-index: 70;
+  width: min(360px, calc(100vw - 32px));
+  padding: 14px 16px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  animation: update-in 0.25s ease-out;
+}
+@keyframes update-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.update-title {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.update-text {
+  margin: 4px 0 12px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.update-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

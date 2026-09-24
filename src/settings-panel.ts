@@ -63,6 +63,7 @@ function sections(opts: { menuBar: boolean; themeHelp: ThemeHelp }, close: () =>
           hint: "Otherwise Folio asks first when another program changes a file",
         },
         ...(opts.menuBar ? [{ key: "menuBar", label: "Show menu bar" } as Row] : []),
+        { key: "checkUpdates", label: "Check for updates automatically", hint: "Once a day; you're asked before anything is installed" },
       ],
     },
     {

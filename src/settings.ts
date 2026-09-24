@@ -26,6 +26,10 @@ export interface Settings {
   previewTheme: string;
   previewThemeFile: string;
   exportOptions: Partial<ExportOptions>;
+  checkUpdates: boolean;
+  /** An update the user chose to skip (no reminder until a newer one). */
+  skippedVersion: string;
+  lastUpdateCheck: number;
   focusHighlight: FocusHighlight;
   focusTypewriter: boolean;
 }
@@ -50,6 +54,9 @@ const defaults: Settings = {
   previewTheme: "",
   previewThemeFile: "",
   exportOptions: {},
+  checkUpdates: true,
+  skippedVersion: "",
+  lastUpdateCheck: 0,
   focusHighlight: "sentence",
   focusTypewriter: true,
 };

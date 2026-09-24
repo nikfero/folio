@@ -3,6 +3,7 @@ name = "folio"
 version = "0.4.0"
 description = "A light, fast Markdown viewer and editor"
 authors = ["nikfero"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -29,6 +30,8 @@ tauri-plugin-clipboard-manager = "2"
 base64 = "0.22"
 trash = "5"
 regex = "1"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 # Only to switch off WebView2's browser shortcuts (F12, Ctrl+F, F5, Alt+Left…),
 # which Tauri doesn't expose; same versions Tauri already uses.

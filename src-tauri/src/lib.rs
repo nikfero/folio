@@ -651,6 +651,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     {
         let app_menu = SubmenuBuilder::new(app, "Folio")
             .about(None)
+            .item(&item("check-updates", "Check for Updates…", None)?)
             .separator()
             .item(&item("settings", "Settings…", Some("Cmd+,"))?)
             .separator()
@@ -684,6 +685,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     #[cfg(not(target_os = "macos"))]
     {
         let help = SubmenuBuilder::new(app, "Help")
+            .item(&item("check-updates", "Check for Updates…", None)?)
             .item(&item("about", "About Folio", None)?)
             .build()?;
         Menu::with_items(app, &[&file.build()?, &view.build()?, &tabs.build()?, &help])
@@ -738,6 +740,8 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Handoff::default())

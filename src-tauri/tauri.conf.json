@@ -48,6 +48,21 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true,
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "copyright": "Copyright © 2026 nikfero"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzQjAzQTdCN0Y1RUNGRUMKUldUc3oxNS9lenF3Z3c0amRacFU4TmlaQnUvc0ZndDNqWFFBS25iZG4wWkRXeTBmZ1dyNDdPM2wK",
+      "endpoints": [
+        "https://github.com/nikfero/folio/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

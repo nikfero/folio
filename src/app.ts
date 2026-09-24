@@ -42,6 +42,7 @@ import { FileTree } from "./filetree";
 import { SearchPanel } from "./search";
 import { buildHtml } from "./export";
 import { askExportOptions } from "./export-options";
+import { checkForUpdates, type UpdateHooks } from "./updater";
 import { applyPreviewTheme, exampleFiles, guideText, refreshCustomTheme } from "./themes";
 import { openPalette, type PaletteItem, type PaletteSource } from "./palette";
 import {
@@ -235,6 +236,7 @@ export class App {
     "toggle-auto-reload": () => this.toggleAutoReload(),
     "toggle-focus": () => this.setFocusMode(!this.focusMode),
     "toggle-fullscreen": () => this.toggleFullscreen(),
+    "check-updates": () => checkForUpdates(true, this.updateHooks),
     "theme-guide": () => this.openThemeGuide(),
     "theme-examples": () => this.saveThemeExamples(),
     "fold-all": () => this.foldAll(true),
@@ -295,6 +297,7 @@ export class App {
     }
     await this.recoverUnsaved();
     await this.openRequests(await frontendReady());
+    if (this.win.label === "main") setTimeout(() => void checkForUpdates(false, this.updateHooks), 5000);
     setInterval(() => void this.pollDisk(), 1500);
   }
 
@@ -542,6 +545,23 @@ export class App {
     tab.recoverySaved = false;
     await recoveryRemove(tab.recoveryId).catch(() => {});
   }
+
+  /** Before an update is installed (which closes Folio), every unsaved document is written to its recovery file. */
+  private updateHooks: UpdateHooks = {
+    beforeInstall: async () => {
+      await Promise.all(
+        this.tabs
+          .filter((t) => this.isDirty(t))
+          .map((t) => {
+            clearTimeout(t.recoveryTimer);
+            t.recoverySaved = true;
+            return recoverySave({ id: t.recoveryId, path: t.path, content: t.state.doc.toString(), time: Date.now() });
+          }),
+      );
+      // Other windows back up their own edits a second after each change; give them that second.
+      await new Promise((r) => setTimeout(r, 1200));
+    },
+  };
 
   /** Reopens unsaved changes left by a crash (or a forced quit) in the last run. */
   private async recoverUnsaved(): Promise<void> {
@@ -824,6 +844,7 @@ export class App {
       ["mode-edit", "View: Edit"],
       ["cycle-mode", "View: Cycle Read / Live / Split / Edit", keys("E")],
       ["toggle-sidebar", "Toggle Sidebar", keys("\\")],
+      ["check-updates", "Check for Updates…"],
       ["theme-guide", "Themes & Custom CSS: Open the Guide"],
       ["theme-examples", "Themes & Custom CSS: Save the Example Files…"],
       ["fold-all", "Fold All Sections", isMac ? "⌃⌥[" : "Ctrl+Alt+["],
@@ -1488,6 +1509,8 @@ export class App {
       item("Actual Size", "zoom-reset", `${mod}0`),
       "separator",
       item("Settings…", "settings", `${mod},`),
+      item("Check for Updates…", "check-updates"),
+      item("About Folio", "about"),
     ];
   }
 

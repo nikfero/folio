@@ -145,7 +145,34 @@ The installers aren't code-signed yet, so each operating system warns the first 
 | macOS | *"Folio can't be opened because Apple cannot check it"* | Right-click the app, choose **Open**, then **Open** again. Or run `xattr -cr /Applications/Folio.app` in Terminal. |
 | Linux | Nothing, except that the AppImage has to be made executable | `chmod +x Folio_*.AppImage` |
 
-Removing these warnings needs an Apple Developer account (US$99/year) for macOS and a code-signing certificate for Windows. Both can be added to the workflow later.
+To remove these warnings, sign the builds: **[docs/SIGNING.md](SIGNING.md)** explains how, for macOS with your Apple Developer account and for Windows with SignPath. The workflow signs automatically once the secrets exist.
+
+### Updates
+
+Installed copies of Folio check for a new version once a day, and when you choose **Check for Updates…**. They offer to download it, install it and restart; unsaved changes reopen afterwards. Each release includes a `latest.json` file saying which version is newest and where its files are. Installed copies read that file from the **latest published release**. Drafts and pre-releases are ignored, so nobody is offered an update until you publish.
+
+- **The repository must be public.** Files of a private repository's releases can't be downloaded without logging in, so updates only start working once it's public.
+- **Update key:** update files are signed with a key, and installed copies only accept files signed with it. The key was created once, with `npx tauri signer generate`:
+  - The **private key** is `~/.tauri/folio.key` on your computer (`C:\Users\<you>\.tauri\folio.key`). It must never be in the repository.
+  - Its **password** is in `~/.tauri/folio.key.password`.
+  - The **public key** is in `tauri.conf.json` (`plugins.updater.pubkey`).
+
+  **Back up the private key and its password** (a password manager is ideal, then delete the password file). If either is lost, installed copies can't be updated any more and everyone has to reinstall once by hand.
+- **GitHub needs the private key** to sign the release builds. Add two repository secrets once, the key file's contents and its password:
+  ```bash
+  gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/folio.key
+  gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.tauri/folio.key.password
+  ```
+  Or on the website: **Settings → Secrets and variables → Actions → New repository secret**, pasting each file's contents. Without them, release builds fail at the end with *"A public key has been found, but no private key"*.
+- **Building installers on your own computer** (`npm run tauri build`) needs the key too. In PowerShell:
+  ```powershell
+  $env:TAURI_SIGNING_PRIVATE_KEY = "$HOME\.tauri\folio.key"
+  $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = Get-Content "$HOME\.tauri\folio.key.password"
+  npm run tauri build
+  ```
+  `npm run tauri dev` doesn't need it.
+- **Linux:** the AppImage updates itself. Installs from the `.deb` or `.rpm` are updated by installing the new package.
+- **Windows** updates use the `-setup.exe` installer and run it in "passive" mode, which shows only a progress bar.
 
 ### Where this is configured
 
@@ -153,4 +180,5 @@ Removing these warnings needs an Apple Developer account (US$99/year) for macOS 
 |---|---|
 | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | Builds the installers and creates the draft release |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Checks every push to `main` (type check, frontend build, Rust lint) |
-| [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) | App version, name, icons, file associations and bundle settings |
+| [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) | App version, name, icons, file associations, bundle settings, and the updater (public key, where to look for updates) |
+| [`docs/SIGNING.md`](SIGNING.md) | Code signing for macOS and Windows |
