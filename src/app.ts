@@ -1,0 +1,973 @@
+import { EditorView, type ViewUpdate } from "@codemirror/view";
+import type { EditorState, Text } from "@codemirror/state";
+import { openSearchPanel } from "@codemirror/search";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+
+import { createEditor, makeState, minimalReplace } from "./editor";
+import { Preview } from "./preview";
+import { ScrollMap, editorTopLine, revealLine, scrollEditorToLine } from "./scrollsync";
+import { FindBar } from "./find";
+import { toggleTaskLine } from "./markdown";
+import { icons } from "./icons";
+import { closeMenu, confirmUnsaved, showMenu, toast, type MenuEntry } from "./ui";
+import * as settings from "./settings";
+import {
+  MARKDOWN_EXTS,
+  basename,
+  dirname,
+  fileMtime,
+  frontendReady,
+  isMac,
+  isMarkdownPath,
+  newWindow,
+  pathKey,
+  readText,
+  resolvePath,
+  writeText,
+  type OpenRequest,
+} from "./platform";
+
+export type Mode = "read" | "split" | "edit";
+const MODES: Mode[] = ["read", "split", "edit"];
+
+interface Tab {
+  id: number;
+  path: string | null;
+  untitledNo: number;
+  state: EditorState;
+  savedDoc: Text;
+  bom: boolean;
+  eol: "\n" | "\r\n";
+  mtime: number | null;
+  mode: Mode;
+  external: null | "changed" | "deleted";
+  saving: boolean;
+  editorTop: number;
+  previewTop: number;
+}
+
+const mod = isMac ? "⌘" : "Ctrl+";
+const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
+const MD_FILTERS = [
+  { name: "Markdown", extensions: MARKDOWN_EXTS },
+  { name: "All files", extensions: ["*"] },
+];
+
+export class App {
+  private tabs: Tab[] = [];
+  private active: Tab | null = null;
+  private nextId = 1;
+  private win = getCurrentWebviewWindow();
+
+  private view: EditorView;
+  private preview: Preview;
+  private scrollMap: ScrollMap;
+  private find: FindBar;
+
+  private workspace = $("#workspace");
+  private tabsEl = $("#tabs");
+  private editorPane = $("#editor-pane");
+  private previewPane = $("#preview-pane");
+  private tocEl = $("#toc");
+  private tocList = $("#toc-list");
+  private banner = $("#banner");
+  private welcome = $("#welcome");
+
+  private renderTimer = 0;
+  private syncLock: "editor" | "preview" | null = null;
+  private syncTimer = 0;
+  private tocHeadings: { line: number; el: HTMLElement }[] = [];
+  private wordCount = 0;
+
+  constructor() {
+    this.view = createEditor(this.editorPane, (u) => this.onEditorUpdate(u));
+    this.preview = new Preview(this.previewPane, {
+      onToggleTask: (line) => this.toggleTask(line),
+      onLink: (href) => void this.followLink(href),
+      onJumpToSource: (line, how) => this.jumpToSource(line, how),
+    });
+    this.scrollMap = new ScrollMap(this.previewPane);
+    this.find = new FindBar(this.workspace, this.previewPane, this.preview.body);
+  }
+
+  async start(): Promise<void> {
+    this.applyTheme();
+    this.applyZoom();
+    this.applyLayoutSettings();
+    this.bindChrome();
+    this.bindKeys();
+    this.bindScrollSync();
+    await this.bindWindow();
+    this.refreshUi();
+    await this.openRequests(await frontendReady());
+    setInterval(() => void this.pollDisk(), 1500);
+  }
+
+  // ------------------------------------------------------------------ tabs
+
+  private isDirty(tab: Tab): boolean {
+    return !tab.state.doc.eq(tab.savedDoc);
+  }
+
+  private tabName(tab: Tab): string {
+    return tab.path ? basename(tab.path) : tab.untitledNo > 1 ? `Untitled-${tab.untitledNo}` : "Untitled";
+  }
+
+  private createTab(path: string | null, text: string, opts: Partial<Tab> = {}): Tab {
+    const state = makeState(text);
+    const untitledNo = path ? 0 : Math.max(0, ...this.tabs.map((t) => t.untitledNo)) + 1;
+    const tab: Tab = {
+      id: this.nextId++,
+      path,
+      untitledNo,
+      state,
+      savedDoc: state.doc,
+      bom: false,
+      eol: "\n",
+      mtime: null,
+      mode: path ? settings.get("defaultMode") : "split",
+      external: null,
+      saving: false,
+      editorTop: 0,
+      previewTop: 0,
+      ...opts,
+    };
+    // Reuse a blank, untouched "Untitled" tab instead of piling up empty ones.
+    const blank = this.active && !this.active.path && this.active.state.doc.length === 0 ? this.active : null;
+    const index = this.active ? this.tabs.indexOf(this.active) + 1 : this.tabs.length;
+    this.tabs.splice(index, 0, tab);
+    if (blank && path) this.removeTab(blank, false);
+    this.activate(tab);
+    return tab;
+  }
+
+  newTab(): void {
+    this.createTab(null, "");
+    this.view.focus();
+  }
+
+  private activate(tab: Tab): void {
+    if (this.active === tab) return;
+    this.stashScroll();
+    this.active = tab;
+    this.view.setState(tab.state);
+    this.renderNow();
+    this.refreshUi();
+    requestAnimationFrame(() => {
+      if (this.active !== tab) return;
+      this.view.requestMeasure();
+      this.lockSync("editor");
+      revealLine(this.view, tab.editorTop);
+      this.previewPane.scrollTop = tab.previewTop;
+    });
+  }
+
+  private stashScroll(): void {
+    if (!this.active) return;
+    this.active.editorTop = editorTopLine(this.view);
+    this.active.previewTop = this.previewPane.scrollTop;
+  }
+
+  async closeTab(tab: Tab): Promise<boolean> {
+    if (this.isDirty(tab)) {
+      this.activate(tab);
+      const choice = await confirmUnsaved(this.tabName(tab));
+      if (choice === "cancel") return false;
+      if (choice === "save" && !(await this.save(tab))) return false;
+    }
+    this.removeTab(tab, true);
+    return true;
+  }
+
+  private removeTab(tab: Tab, activateNeighbor: boolean): void {
+    const i = this.tabs.indexOf(tab);
+    if (i < 0) return;
+    this.tabs.splice(i, 1);
+    if (this.active === tab) {
+      this.active = null;
+      const next = this.tabs[Math.min(i, this.tabs.length - 1)];
+      if (activateNeighbor && next) this.activate(next);
+      else if (!next) {
+        this.view.setState(makeState(""));
+        this.preview.clear();
+      }
+    }
+    this.refreshUi();
+  }
+
+  private async closeOthers(keep: Tab, onlyRight = false): Promise<void> {
+    const start = onlyRight ? this.tabs.indexOf(keep) + 1 : 0;
+    for (const t of this.tabs.slice(start)) {
+      if (t !== keep && !(await this.closeTab(t))) return;
+    }
+  }
+
+  private async moveToNewWindow(tab: Tab): Promise<void> {
+    const doc: OpenRequest = { path: tab.path, content: this.isDirty(tab) ? tab.state.doc.toString() : null };
+    try {
+      await newWindow([doc]);
+      this.removeTab(tab, true);
+    } catch (e) {
+      toast(`Couldn't open a new window: ${e}`, "error");
+    }
+  }
+
+  // ------------------------------------------------------------ open/save
+
+  async openRequests(docs: OpenRequest[]): Promise<void> {
+    for (const d of docs) {
+      if (d.path) {
+        const tab = await this.openPath(d.path);
+        if (tab && d.content != null) this.replaceDoc(tab, d.content, false);
+      } else if (d.content != null) {
+        this.createTab(null, d.content);
+      }
+    }
+  }
+
+  async openPath(path: string): Promise<Tab | null> {
+    const existing = this.tabs.find((t) => t.path && pathKey(t.path) === pathKey(path));
+    if (existing) {
+      this.activate(existing);
+      return existing;
+    }
+    try {
+      const file = await readText(path);
+      const tab = this.createTab(path, file.text, {
+        bom: file.bom,
+        eol: file.text.includes("\r\n") ? "\r\n" : "\n",
+        mtime: file.mtime,
+      });
+      settings.addRecent(path);
+      return tab;
+    } catch (e) {
+      settings.removeRecent(path);
+      toast(`Couldn't open ${basename(path)}: ${e}`, "error");
+      this.refreshUi();
+      return null;
+    }
+  }
+
+  async openFileDialog(): Promise<void> {
+    const picked = await openDialog({
+      multiple: true,
+      filters: MD_FILTERS,
+      defaultPath: this.active?.path ? dirname(this.active.path) : undefined,
+    });
+    if (!picked) return;
+    for (const p of Array.isArray(picked) ? picked : [picked]) await this.openPath(p);
+  }
+
+  async save(tab: Tab | null = this.active): Promise<boolean> {
+    if (!tab) return false;
+    if (!tab.path) return this.saveAs(tab);
+    const doc = tab.state.doc;
+    const text = tab.eol === "\r\n" ? doc.toString().replace(/\n/g, "\r\n") : doc.toString();
+    tab.saving = true;
+    try {
+      tab.mtime = await writeText(tab.path, text, tab.bom);
+      tab.savedDoc = doc;
+      tab.external = null;
+      this.refreshUi();
+      this.flash("Saved");
+      return true;
+    } catch (e) {
+      toast(`Couldn't save ${this.tabName(tab)}: ${e}`, "error");
+      return false;
+    } finally {
+      tab.saving = false;
+    }
+  }
+
+  async saveAs(tab: Tab | null = this.active): Promise<boolean> {
+    if (!tab) return false;
+    const path = await saveDialog({
+      defaultPath: tab.path ?? `${this.tabName(tab)}.md`,
+      filters: MD_FILTERS,
+    });
+    if (!path) return false;
+    tab.path = path;
+    tab.untitledNo = 0;
+    settings.addRecent(path);
+    return this.save(tab);
+  }
+
+  /** Replaces a tab's document; `asSaved` marks the result as the on-disk version. */
+  private replaceDoc(tab: Tab, text: string, asSaved: boolean): void {
+    const change = minimalReplace(tab.state, text.replace(/\r\n?/g, "\n"));
+    if (change) {
+      if (tab === this.active) this.view.dispatch({ changes: change, userEvent: "external" });
+      else tab.state = tab.state.update({ changes: change }).state;
+    }
+    if (asSaved) tab.savedDoc = tab.state.doc;
+    if (tab !== this.active) this.refreshUi();
+  }
+
+  async reloadFromDisk(tab: Tab | null = this.active): Promise<void> {
+    if (!tab?.path) return;
+    try {
+      const file = await readText(tab.path);
+      tab.bom = file.bom;
+      tab.eol = file.text.includes("\r\n") ? "\r\n" : "\n";
+      tab.mtime = file.mtime;
+      tab.external = null;
+      this.replaceDoc(tab, file.text, true);
+      this.refreshUi();
+    } catch (e) {
+      toast(`Couldn't reload ${this.tabName(tab)}: ${e}`, "error");
+    }
+  }
+
+  private polling = false;
+
+  /** Detects files changed or removed by other programs. */
+  private async pollDisk(): Promise<void> {
+    if (this.polling) return;
+    this.polling = true;
+    try {
+      for (const tab of [...this.tabs]) {
+        if (!tab.path || tab.saving) continue;
+        const mtime = await fileMtime(tab.path).catch(() => null);
+        if (tab.saving || !this.tabs.includes(tab)) continue;
+        if (mtime === null) {
+          if (tab.external !== "deleted") {
+            tab.external = "deleted";
+            this.refreshUi();
+          }
+        } else if (mtime !== tab.mtime) {
+          if (!this.isDirty(tab)) {
+            await this.reloadFromDisk(tab);
+            if (tab === this.active) this.flash("Reloaded from disk");
+          } else if (tab.external !== "changed") {
+            tab.external = "changed";
+            this.refreshUi();
+          }
+        } else if (tab.external === "deleted") {
+          tab.external = null;
+          this.refreshUi();
+        }
+      }
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  // --------------------------------------------------------------- preview
+
+  private onEditorUpdate(u: ViewUpdate): void {
+    const tab = this.active;
+    if (!tab) return;
+    tab.state = u.state;
+    if (u.docChanged) {
+      this.scheduleRender();
+      this.refreshUi();
+    } else if (u.selectionSet) {
+      this.updateStatus();
+    }
+  }
+
+  private scheduleRender(): void {
+    clearTimeout(this.renderTimer);
+    const delay = (this.active?.state.doc.length ?? 0) > 200_000 ? 400 : 120;
+    this.renderTimer = window.setTimeout(() => this.renderNow(), delay);
+  }
+
+  private renderNow(): void {
+    clearTimeout(this.renderTimer);
+    const tab = this.active;
+    if (!tab) return;
+    this.preview.render(tab.state.doc.toString(), tab.path, settings.resolvedTheme());
+    this.scrollMap.invalidate();
+    this.wordCount = this.preview.wordCount();
+    this.buildToc();
+    this.find.refresh();
+    this.updateStatus();
+    if (tab.mode === "split" && this.syncLock !== "preview") this.syncPreviewToEditor();
+  }
+
+  private toggleTask(line: number): void {
+    const tab = this.active;
+    if (!tab) return;
+    const doc = this.view.state.doc;
+    if (line + 1 > doc.lines) return;
+    const l = doc.line(line + 1);
+    const next = toggleTaskLine(l.text);
+    if (next === null) return this.renderNow();
+    const wasClean = !this.isDirty(tab);
+    this.view.dispatch({ changes: { from: l.from, to: l.to, insert: next }, userEvent: "input.toggle-task" });
+    // In a clean document a checkbox tick is saved right away, like any other viewer action.
+    if (wasClean && tab.path) void this.save(tab);
+  }
+
+  private jumpToSource(line: number, how: "modclick" | "dblclick"): void {
+    const tab = this.active;
+    if (!tab) return;
+    if (tab.mode === "read") {
+      if (how === "dblclick") return; // keep double-click for word selection while reading
+      this.setMode("split");
+    }
+    const doc = this.view.state.doc;
+    const pos = doc.line(Math.min(doc.lines, line + 1)).from;
+    this.lockSync("preview");
+    this.view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+    this.view.focus();
+  }
+
+  private async followLink(href: string): Promise<void> {
+    if (/^[a-z][\w+.-]*:/i.test(href) && !/^file:/i.test(href) && !/^[a-z]:[\\/]/i.test(href)) {
+      await openUrl(href).catch((e) => toast(`Couldn't open link: ${e}`, "error"));
+      return;
+    }
+    const [rawPath, fragment] = href.split("#");
+    let rel = rawPath;
+    try {
+      if (/^file:/i.test(rawPath)) {
+        rel = decodeURIComponent(new URL(rawPath).pathname);
+        if (/^\/[a-z]:/i.test(rel)) rel = rel.slice(1); // file:///C:/x -> C:/x
+      } else {
+        rel = decodeURI(rawPath);
+      }
+    } catch {
+      /* keep raw */
+    }
+    const base = this.active?.path ? dirname(this.active.path) : null;
+    if (!base && !/^([a-z]:[\\/]|\/)/i.test(rel)) {
+      toast("Save this document first to follow relative links.");
+      return;
+    }
+    const target = resolvePath(base ?? "", rel);
+    if (isMarkdownPath(target)) {
+      const tab = await this.openPath(target);
+      if (tab && fragment) requestAnimationFrame(() => this.preview.scrollToId(decodeURIComponent(fragment)));
+    } else {
+      await revealItemInDir(target).catch((e) => toast(`Couldn't open ${basename(target)}: ${e}`, "error"));
+    }
+  }
+
+  // ----------------------------------------------------------- scroll sync
+
+  private lockSync(source: "editor" | "preview"): void {
+    this.syncLock = source;
+    clearTimeout(this.syncTimer);
+    this.syncTimer = window.setTimeout(() => (this.syncLock = null), 120);
+  }
+
+  private syncPreviewToEditor(): void {
+    this.previewPane.scrollTop = this.scrollMap.topForLine(editorTopLine(this.view));
+  }
+
+  private syncEditorToPreview(): void {
+    scrollEditorToLine(this.view, this.scrollMap.lineForTop(this.previewPane.scrollTop));
+  }
+
+  private bindScrollSync(): void {
+    this.view.scrollDOM.addEventListener("scroll", () => {
+      if (this.active?.mode === "split" && this.syncLock !== "preview") {
+        this.lockSync("editor");
+        this.syncPreviewToEditor();
+      }
+      if (this.active?.mode === "edit") this.updateTocActive();
+    });
+    this.previewPane.addEventListener("scroll", () => {
+      if (this.active?.mode === "split" && this.syncLock !== "editor") {
+        this.lockSync("preview");
+        this.syncEditorToPreview();
+      }
+      this.updateTocActive();
+    });
+    // Images, diagrams and window resizes all move blocks around.
+    const invalidate = new ResizeObserver(() => this.scrollMap.invalidate());
+    invalidate.observe(this.preview.body);
+    invalidate.observe(this.previewPane);
+  }
+
+  // ------------------------------------------------------------------ mode
+
+  setMode(mode: Mode): void {
+    const tab = this.active;
+    if (!tab || tab.mode === mode) return;
+    const prev = tab.mode;
+    // Carry the reading position across the switch.
+    const line = prev === "edit" ? editorTopLine(this.view) : this.scrollMap.lineForTop(this.previewPane.scrollTop);
+    tab.mode = mode;
+    this.applyMode();
+    this.updateStatus();
+    requestAnimationFrame(() => {
+      this.scrollMap.invalidate();
+      this.lockSync("editor");
+      if (mode !== "read") revealLine(this.view, line);
+      if (mode !== "edit") this.previewPane.scrollTop = this.scrollMap.topForLine(line);
+    });
+    if (mode === "edit" && this.find.isOpen) this.find.close();
+    if (mode !== "read") this.view.focus();
+  }
+
+  private cycleMode(): void {
+    if (!this.active) return;
+    this.setMode(MODES[(MODES.indexOf(this.active.mode) + 1) % MODES.length]);
+  }
+
+  private applyMode(): void {
+    const mode = this.active?.mode ?? "read";
+    this.workspace.dataset.mode = this.active ? mode : "none";
+    for (const b of document.querySelectorAll<HTMLElement>("#modes button"))
+      b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
+  }
+
+  // ------------------------------------------------------------------- toc
+
+  private buildToc(): void {
+    this.tocList.innerHTML = "";
+    this.tocHeadings = [];
+    const headings = this.preview.headings();
+    if (!headings.length) {
+      this.tocList.innerHTML = `<p class="toc-empty">No headings</p>`;
+      return;
+    }
+    const minLevel = Math.min(...headings.map((h) => Number(h.tagName[1])));
+    for (const h of headings) {
+      const item = document.createElement("a");
+      item.className = "toc-item";
+      item.style.setProperty("--depth", String(Number(h.tagName[1]) - minLevel));
+      item.textContent = h.textContent;
+      item.title = h.textContent ?? "";
+      const line = Number(h.dataset.line ?? 0);
+      item.addEventListener("click", () => {
+        if (this.active?.mode === "edit") revealLine(this.view, line);
+        else h.scrollIntoView({ block: "start" });
+      });
+      this.tocList.appendChild(item);
+      this.tocHeadings.push({ line, el: item });
+    }
+    this.updateTocActive();
+  }
+
+  private updateTocActive(): void {
+    if (this.tocEl.hidden || !this.tocHeadings.length) return;
+    const line =
+      this.active?.mode === "edit"
+        ? editorTopLine(this.view)
+        : this.scrollMap.lineForTop(this.previewPane.scrollTop + 24);
+    let current = this.tocHeadings[0];
+    for (const h of this.tocHeadings) if (h.line <= line + 0.5) current = h;
+    for (const h of this.tocHeadings) h.el.classList.toggle("active", h === current);
+  }
+
+  private toggleToc(): void {
+    const show = this.tocEl.hidden === true;
+    this.tocEl.hidden = !show;
+    settings.set("toc", show);
+    this.scrollMap.invalidate();
+    this.updateTocActive();
+  }
+
+  // -------------------------------------------------------------------- UI
+
+  private refreshUi(): void {
+    this.renderTabs();
+    this.applyMode();
+    this.renderBanner();
+    this.updateStatus();
+    this.welcome.hidden = this.tabs.length > 0;
+    if (!this.tabs.length) this.renderWelcome();
+    const tab = this.active;
+    const title = tab ? `${this.isDirty(tab) ? "● " : ""}${this.tabName(tab)} — Folio` : "Folio";
+    if (document.title !== title) {
+      document.title = title;
+      void this.win.setTitle(title).catch(() => {});
+    }
+  }
+
+  private renderTabs(): void {
+    this.tabsEl.innerHTML = "";
+    for (const tab of this.tabs) {
+      const el = document.createElement("div");
+      el.className = "tab";
+      el.dataset.id = String(tab.id);
+      el.setAttribute("role", "tab");
+      el.setAttribute("aria-selected", String(tab === this.active));
+      el.title = tab.path ?? this.tabName(tab);
+      if (this.isDirty(tab)) el.classList.add("dirty");
+      if (tab.external) el.classList.add("stale");
+      el.innerHTML = `<span class="tab-icon">${icons.file}</span><span class="tab-name"></span><button class="tab-close" title="Close (${mod}W)" aria-label="Close tab">${icons.close}</button>`;
+      el.querySelector(".tab-name")!.textContent = this.tabName(tab);
+      this.tabsEl.appendChild(el);
+    }
+    this.tabsEl.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  private renderBanner(): void {
+    const tab = this.active;
+    if (!tab?.external) {
+      this.banner.hidden = true;
+      return;
+    }
+    this.banner.hidden = false;
+    this.banner.innerHTML =
+      tab.external === "changed"
+        ? `<span>This file was changed by another program.</span><button class="btn small primary" data-act="reload">Reload</button><button class="btn small" data-act="keep">Keep my version</button>`
+        : `<span>This file was deleted or moved.</span><button class="btn small primary" data-act="save">Save to recreate</button><button class="btn small" data-act="close">Close tab</button>`;
+  }
+
+  private renderWelcome(): void {
+    const list = $("#recent-list");
+    list.innerHTML = "";
+    const recent = settings.recent();
+    $("#recent").hidden = !recent.length;
+    for (const path of recent.slice(0, 8)) {
+      const item = document.createElement("button");
+      item.className = "recent-item";
+      item.innerHTML = `<span class="recent-name"></span><span class="recent-dir"></span>`;
+      item.querySelector(".recent-name")!.textContent = basename(path);
+      item.querySelector(".recent-dir")!.textContent = dirname(path);
+      item.title = path;
+      item.addEventListener("click", () => void this.openPath(path));
+      list.appendChild(item);
+    }
+  }
+
+  private updateStatus(): void {
+    const tab = this.active;
+    $("#statusbar").hidden = !tab;
+    if (!tab) return;
+    $("#st-path").textContent = tab.path ?? this.tabName(tab);
+    $("#st-path").title = tab.path ?? "";
+    const state = tab.state;
+    const head = state.selection.main.head;
+    const line = state.doc.lineAt(head);
+    $("#st-pos").textContent = tab.mode === "read" ? "" : `Ln ${line.number}, Col ${head - line.from + 1}`;
+    const words = this.wordCount;
+    $("#st-words").textContent = `${words.toLocaleString()} words · ${Math.max(1, Math.round(words / 230))} min read`;
+    $("#st-eol").textContent = tab.eol === "\r\n" ? "CRLF" : "LF";
+  }
+
+  private flashTimer = 0;
+  private flash(message: string): void {
+    const el = $("#st-flash");
+    el.textContent = message;
+    el.classList.add("show");
+    clearTimeout(this.flashTimer);
+    this.flashTimer = window.setTimeout(() => el.classList.remove("show"), 1600);
+  }
+
+  private applyTheme(): void {
+    const pref = settings.get("theme");
+    document.documentElement.dataset.theme = settings.resolvedTheme();
+    const btn = $("#btn-theme");
+    btn.innerHTML = pref === "light" ? icons.sun : pref === "dark" ? icons.moon : icons.auto;
+    btn.title = `Theme: ${pref[0].toUpperCase()}${pref.slice(1)}`;
+  }
+
+  private cycleTheme(): void {
+    const order = ["system", "light", "dark"] as const;
+    settings.set("theme", order[(order.indexOf(settings.get("theme")) + 1) % order.length]);
+    this.applyTheme();
+    this.renderNow();
+  }
+
+  private applyZoom(): void {
+    document.documentElement.style.setProperty("--zoom", String(settings.get("zoom")));
+    this.view.requestMeasure();
+    this.scrollMap.invalidate();
+  }
+
+  private zoom(delta: number | null): void {
+    const z = delta === null ? 1 : Math.min(2, Math.max(0.6, Math.round((settings.get("zoom") + delta) * 10) / 10));
+    settings.set("zoom", z);
+    this.applyZoom();
+    this.flash(`Zoom ${Math.round(z * 100)}%`);
+  }
+
+  private applyLayoutSettings(): void {
+    this.tocEl.hidden = !settings.get("toc");
+    this.workspace.style.setProperty("--split", String(settings.get("split")));
+  }
+
+  private appMenuEntries(): MenuEntry[] {
+    const tab = this.active;
+    return [
+      { label: "New Tab", shortcut: `${mod}T`, action: () => this.newTab() },
+      { label: "Open File…", shortcut: `${mod}O`, action: () => void this.openFileDialog() },
+      { label: "Save", shortcut: `${mod}S`, disabled: !tab, action: () => void this.save() },
+      { label: "Save As…", shortcut: `${mod}⇧S`, disabled: !tab, action: () => void this.saveAs() },
+      "separator",
+      { label: "New Window", shortcut: `${mod}⇧N`, action: () => void newWindow() },
+      {
+        label: "Move Tab to New Window",
+        disabled: !tab,
+        action: () => tab && void this.moveToNewWindow(tab),
+      },
+      "separator",
+      { label: "Find", shortcut: `${mod}F`, disabled: !tab, action: () => this.openFind() },
+      { label: "Toggle Outline", shortcut: `${mod}⇧O`, action: () => this.toggleToc() },
+      { label: "Reload from Disk", disabled: !tab?.path, action: () => void this.reloadFromDisk() },
+      {
+        label: "Reveal in Folder",
+        disabled: !tab?.path,
+        action: () => tab?.path && void revealItemInDir(tab.path).catch((e) => toast(String(e), "error")),
+      },
+      "separator",
+      { label: "Zoom In", shortcut: `${mod}+`, action: () => this.zoom(0.1) },
+      { label: "Zoom Out", shortcut: `${mod}−`, action: () => this.zoom(-0.1) },
+      { label: "Actual Size", shortcut: `${mod}0`, action: () => this.zoom(null) },
+    ];
+  }
+
+  private tabMenuEntries(tab: Tab): MenuEntry[] {
+    return [
+      { label: "Close", shortcut: `${mod}W`, action: () => void this.closeTab(tab) },
+      { label: "Close Others", disabled: this.tabs.length < 2, action: () => void this.closeOthers(tab) },
+      {
+        label: "Close to the Right",
+        disabled: this.tabs.indexOf(tab) === this.tabs.length - 1,
+        action: () => void this.closeOthers(tab, true),
+      },
+      "separator",
+      { label: "Move to New Window", action: () => void this.moveToNewWindow(tab) },
+      "separator",
+      {
+        label: "Copy Path",
+        disabled: !tab.path,
+        action: () => tab.path && void navigator.clipboard.writeText(tab.path),
+      },
+      {
+        label: "Reveal in Folder",
+        disabled: !tab.path,
+        action: () => tab.path && void revealItemInDir(tab.path).catch((e) => toast(String(e), "error")),
+      },
+    ];
+  }
+
+  private openFind(): void {
+    const tab = this.active;
+    if (!tab) return;
+    if (tab.mode === "edit" || (tab.mode === "split" && this.view.hasFocus)) openSearchPanel(this.view);
+    else this.find.open();
+  }
+
+  private tabById(el: Element | null): Tab | undefined {
+    const id = Number(el?.closest<HTMLElement>(".tab")?.dataset.id);
+    return this.tabs.find((t) => t.id === id);
+  }
+
+  private bindChrome(): void {
+    $("#btn-new-tab").innerHTML = icons.plus;
+    $("#btn-toc").innerHTML = icons.outline;
+    $("#btn-menu").innerHTML = icons.more;
+    $("#btn-new-tab").title = `New tab (${mod}T)`;
+    $("#btn-toc").title = `Outline (${mod}⇧O)`;
+    $("#btn-new-tab").addEventListener("click", () => this.newTab());
+    $("#btn-toc").addEventListener("click", () => this.toggleToc());
+    $("#btn-theme").addEventListener("click", () => this.cycleTheme());
+    $("#btn-menu").addEventListener("click", (e) => {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      showMenu(r.right - 220, r.bottom + 4, this.appMenuEntries());
+    });
+    for (const b of document.querySelectorAll<HTMLElement>("#modes button")) {
+      b.title += ` (${mod}E to cycle)`;
+      b.addEventListener("click", () => this.setMode(b.dataset.mode as Mode));
+    }
+    $("#welcome-open").addEventListener("click", () => void this.openFileDialog());
+    $("#welcome-new").addEventListener("click", () => this.newTab());
+    for (const el of document.querySelectorAll(".kbd-mod")) el.textContent = isMac ? "⌘" : "Ctrl";
+
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (settings.get("theme") === "system") {
+        this.applyTheme();
+        this.renderNow();
+      }
+    });
+
+    this.banner.addEventListener("click", (e) => {
+      const act = (e.target as HTMLElement).closest<HTMLElement>("[data-act]")?.dataset.act;
+      const tab = this.active;
+      if (!act || !tab) return;
+      if (act === "reload") void this.reloadFromDisk(tab);
+      else if (act === "save") void this.save(tab);
+      else if (act === "close") void this.closeTab(tab);
+      else if (act === "keep" && tab.path) {
+        // Treat the current disk version as seen; the next save overwrites it.
+        void fileMtime(tab.path).then((m) => {
+          tab.mtime = m;
+          tab.external = null;
+          this.refreshUi();
+        });
+      }
+    });
+
+    // Tabs: click to activate, middle-click to close, drag to reorder.
+    this.tabsEl.addEventListener("pointerdown", (e) => {
+      const tab = this.tabById(e.target as Element);
+      if (!tab) return;
+      if (e.button === 1) {
+        e.preventDefault();
+        void this.closeTab(tab);
+        return;
+      }
+      if (e.button !== 0 || (e.target as Element).closest(".tab-close")) return;
+      this.activate(tab);
+      this.dragTab(tab, e);
+    });
+    this.tabsEl.addEventListener("click", (e) => {
+      if (!(e.target as Element).closest(".tab-close")) return;
+      const tab = this.tabById(e.target as Element);
+      if (tab) void this.closeTab(tab);
+    });
+    this.tabsEl.addEventListener("dblclick", (e) => {
+      if (e.target === this.tabsEl) this.newTab();
+    });
+    this.tabsEl.addEventListener("contextmenu", (e) => {
+      const tab = this.tabById(e.target as Element);
+      if (!tab) return;
+      e.preventDefault();
+      showMenu(e.clientX, e.clientY, this.tabMenuEntries(tab));
+    });
+    this.tabsEl.addEventListener(
+      "wheel",
+      (e) => {
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+          this.tabsEl.scrollLeft += e.deltaY;
+          e.preventDefault();
+        }
+      },
+      { passive: false },
+    );
+
+    // Split divider
+    const divider = $("#divider");
+    divider.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      divider.setPointerCapture(e.pointerId);
+      const box = () => {
+        const a = this.editorPane.getBoundingClientRect();
+        const b = this.previewPane.getBoundingClientRect();
+        return { left: a.left, width: b.right - a.left };
+      };
+      const move = (ev: PointerEvent) => {
+        const { left, width } = box();
+        const ratio = Math.min(0.8, Math.max(0.2, (ev.clientX - left) / width));
+        this.workspace.style.setProperty("--split", ratio.toFixed(3));
+      };
+      const up = () => {
+        divider.removeEventListener("pointermove", move);
+        divider.removeEventListener("pointerup", up);
+        settings.set("split", Number(this.workspace.style.getPropertyValue("--split")));
+        this.scrollMap.invalidate();
+      };
+      divider.addEventListener("pointermove", move);
+      divider.addEventListener("pointerup", up);
+    });
+    divider.addEventListener("dblclick", () => {
+      this.workspace.style.setProperty("--split", "0.5");
+      settings.set("split", 0.5);
+    });
+  }
+
+  /** Pointer-based reordering (HTML5 drag-and-drop is taken over by the native file drop handler). */
+  private dragTab(tab: Tab, down: PointerEvent): void {
+    const el = this.tabsEl.querySelector<HTMLElement>(`[data-id="${tab.id}"]`)!;
+    let dragging = false;
+    const move = (e: PointerEvent) => {
+      if (!dragging && Math.abs(e.clientX - down.clientX) < 5) return;
+      dragging = true;
+      el.classList.add("dragging");
+      const siblings = [...this.tabsEl.children].filter((c) => c !== el) as HTMLElement[];
+      const before = siblings.find((s) => {
+        const r = s.getBoundingClientRect();
+        return e.clientX < r.left + r.width / 2;
+      });
+      if (before) this.tabsEl.insertBefore(el, before);
+      else this.tabsEl.appendChild(el);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (!dragging) return;
+      const order = [...this.tabsEl.children].map((c) => Number((c as HTMLElement).dataset.id));
+      this.tabs.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      this.renderTabs();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  private bindKeys(): void {
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        const primary = isMac ? e.metaKey : e.ctrlKey;
+        const key = e.key.toLowerCase();
+        const run = (fn: () => unknown) => {
+          e.preventDefault();
+          e.stopPropagation();
+          closeMenu();
+          fn();
+        };
+
+        if (e.ctrlKey && key === "tab") return run(() => this.cycleTab(e.shiftKey ? -1 : 1));
+        if (key === "f5" || (primary && key === "r")) return run(() => {}); // never reload the webview
+        if (key === "escape" && this.find.isOpen) return run(() => this.find.close());
+        if (!primary || e.altKey) return;
+
+        if (key === "o" && e.shiftKey) return run(() => this.toggleToc());
+        if (key === "o") return run(() => void this.openFileDialog());
+        if (key === "s") return run(() => void (e.shiftKey ? this.saveAs() : this.save()));
+        if (key === "n" && e.shiftKey) return run(() => void newWindow());
+        if (key === "t" || key === "n") return run(() => this.newTab());
+        if (key === "w") return run(() => this.active && void this.closeTab(this.active));
+        if (key === "e") return run(() => this.cycleMode());
+        if (key === "f" && !this.view.hasFocus) return run(() => this.openFind());
+        if (key === "pagedown") return run(() => this.cycleTab(1));
+        if (key === "pageup") return run(() => this.cycleTab(-1));
+        if (key === "=" || key === "+") return run(() => this.zoom(0.1));
+        if (key === "-") return run(() => this.zoom(-0.1));
+        if (key === "0") return run(() => this.zoom(null));
+        if (/^[1-9]$/.test(key)) {
+          const tab = key === "9" ? this.tabs[this.tabs.length - 1] : this.tabs[Number(key) - 1];
+          if (tab) return run(() => this.activate(tab));
+        }
+      },
+      true,
+    );
+  }
+
+  private cycleTab(dir: number): void {
+    if (!this.active || this.tabs.length < 2) return;
+    const i = this.tabs.indexOf(this.active);
+    this.activate(this.tabs[(i + dir + this.tabs.length) % this.tabs.length]);
+  }
+
+  private async bindWindow(): Promise<void> {
+    await this.win.listen<OpenRequest[]>("open-docs", (e) => void this.openRequests(e.payload));
+
+    const overlay = $("#drop-overlay");
+    await this.win.onDragDropEvent((e) => {
+      const p = e.payload;
+      if (p.type === "enter" || p.type === "over") overlay.hidden = false;
+      else if (p.type === "leave") overlay.hidden = true;
+      else if (p.type === "drop") {
+        overlay.hidden = true;
+        const files = p.paths.filter(isMarkdownPath);
+        if (!files.length && p.paths.length) toast("Only Markdown and text files can be opened.");
+        void (async () => {
+          for (const f of files) await this.openPath(f);
+        })();
+      }
+    });
+
+    await this.win.onCloseRequested(async (e) => {
+      const dirty = this.tabs.filter((t) => this.isDirty(t));
+      if (!dirty.length) return;
+      e.preventDefault();
+      for (const tab of dirty) {
+        this.activate(tab);
+        const choice = await confirmUnsaved(this.tabName(tab));
+        if (choice === "cancel") return;
+        if (choice === "save" && !(await this.save(tab))) return;
+      }
+      await this.win.destroy();
+    });
+  }
+}

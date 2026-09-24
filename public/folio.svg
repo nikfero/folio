@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f73e3"/>
+      <stop offset="1" stop-color="#2a45a8"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#dfe6fb"/>
+      <stop offset="1" stop-color="#b9c7f2"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <!-- page -->
+  <path d="M300 200h300l164 164v420a40 40 0 0 1-40 40H300a40 40 0 0 1-40-40V240a40 40 0 0 1 40-40z" fill="#fdfcfa"/>
+  <path d="M600 200v124a40 40 0 0 0 40 40h124z" fill="url(#fold)"/>
+  <!-- heading mark and text lines -->
+  <path d="M340 322h40M340 362h40M352 302l-8 80M376 302l-8 80" stroke="#3a5ccc" stroke-width="16" stroke-linecap="round"/>
+  <rect x="412" y="322" width="140" height="40" rx="20" fill="#3a5ccc"/>
+  <rect x="340" y="456" width="344" height="28" rx="14" fill="#c8d0e0"/>
+  <rect x="340" y="524" width="300" height="28" rx="14" fill="#c8d0e0"/>
+  <rect x="340" y="592" width="344" height="28" rx="14" fill="#c8d0e0"/>
+  <rect x="340" y="660" width="200" height="28" rx="14" fill="#c8d0e0"/>
+</svg>
